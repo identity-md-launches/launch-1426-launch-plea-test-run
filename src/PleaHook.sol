@@ -180,6 +180,8 @@ contract PleaHook {
     uint256 public wallImd;
     bool private callbackExpected;
     bool private hasBought;
+    /// @dev The hour of the newest checkpoint, so `latestPrice` reads one ring entry, not all 25.
+    uint64 private lastCheckpointHour;
 
     mapping(address => Basis) public basisOf;
     Checkpoint[25] public ring;
@@ -263,6 +265,10 @@ contract PleaHook {
 
     /// @notice The most recent hourly checkpoint (the price at the first trade of that hour).
     function latestPrice() public view returns (uint256 best) {
+        // The newest checkpoint is the one `_checkpoint` wrote last (hours only grow); scan the ring
+        // only in the corner case where its price rounded to zero.
+        best = ring[lastCheckpointHour % 25].priceX96;
+        if (best != 0) return best;
         uint64 bestHour;
         for (uint256 i; i < 25; ++i) {
             Checkpoint memory c = ring[i];
@@ -276,6 +282,9 @@ contract PleaHook {
     /// @notice The checkpointed price from at least 24 hours ago (0 when none is old enough).
     function price24hAgo() public view returns (uint256 best) {
         uint64 target = uint64(block.timestamp / 1 hours) - 24;
+        // A checkpoint from exactly that hour is the answer; otherwise scan the ring.
+        Checkpoint storage t = ring[target % 25];
+        if (t.hour == target && t.priceX96 != 0) return t.priceX96;
         uint64 bestHour;
         for (uint256 i; i < 25; ++i) {
             Checkpoint memory c = ring[i];
@@ -951,6 +960,7 @@ contract PleaHook {
             uint256 p = _priceX96(sqrtP);
             c.hour = hour;
             c.priceX96 = p;
+            lastCheckpointHour = hour;
             emit PriceCheckpoint(hour, p);
         }
     }

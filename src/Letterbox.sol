@@ -5,6 +5,7 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {ReentrancyGuardTransient} from "@openzeppelin/contracts/utils/ReentrancyGuardTransient.sol";
 import {Strings} from "@openzeppelin/contracts/utils/Strings.sol";
+import {SafeCast} from "@openzeppelin/contracts/utils/math/SafeCast.sol";
 import {FixedPoint96} from "v4-core/libraries/FixedPoint96.sol";
 import {FullMath} from "v4-core/libraries/FullMath.sol";
 import {CabalGate} from "./CabalGate.sol";
@@ -72,10 +73,11 @@ contract Letterbox is ReentrancyGuardTransient {
     event Delivered(uint256 indexed id, address indexed runner, uint256 imdOut, uint256 tip);
     event Settled(uint256 indexed id, address indexed writer, uint256 amount, uint256 tip);
 
+    /// @dev One storage slot: `amount` is at most the gate's 2.5M PLEA cap (checked before `_open`).
     struct Escrow {
         address writer;
         bool open;
-        uint128 amount;
+        uint88 amount;
     }
 
     // ---------------------------------------------------------------- agreed numbers
@@ -244,7 +246,7 @@ contract Letterbox is ReentrancyGuardTransient {
 
     function _open(uint256 id, address writer, uint256 amount, uint256 unspent, uint256 feePlea, uint8 flags) internal {
         if (unspent != 0) IERC20(address(plea)).safeTransfer(writer, unspent);
-        _escrow[id] = Escrow({writer: writer, open: true, amount: uint128(amount)});
+        _escrow[id] = Escrow({writer: writer, open: true, amount: SafeCast.toUint88(amount)});
         _openOf[writer] = id;
         ++_openCount;
         emit Escrowed(id, writer, amount, feePlea, flags);

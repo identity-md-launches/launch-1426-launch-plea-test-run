@@ -205,7 +205,7 @@ Then:
 | Cashback credit gas | 1,300,000 (Sepolia's gas schedule) |
 | Letterbox | mints the 0.5 test oracle fee itself (`mintOracleFee = true`; refused on chain id 1, where the fee is bought with PLEA like the tip) |
 
-The seven-contract manifest rehearsal reports **24,475,942 gas**, a margin of **−7,698,726** against the 16,777,216 mainnet per-transaction cap. Sepolia accepts it in one transaction (launch #1242 used 81.8M there); the rehearsal reports the margin without enforcing the cap. This local measurement includes harness overhead and excludes transaction intrinsic gas; the deployment service must simulate the actual factory transaction. `test/fork/ForkTestnet.t.sol` rehearses the whole run on a Sepolia fork against the live Intake v2:
+The seven-contract manifest rehearsal reports **24,578,966 gas**, a margin of **−7,801,750** against the 16,777,216 mainnet per-transaction cap. Sepolia accepts it in one transaction (launch #1242 used 81.8M there); the rehearsal reports the margin without enforcing the cap. This local measurement includes harness overhead and excludes transaction intrinsic gas; the deployment service must simulate the actual factory transaction. `test/fork/ForkTestnet.t.sol` rehearses the whole run on a Sepolia fork against the live Intake v2:
 
 ```
 SEPOLIA_RPC_URL=https://ethereum-sepolia-rpc.publicnode.com forge test --match-path 'test/fork/*' -vv
@@ -226,6 +226,20 @@ forge test --isolate --match-path test/Launch.t.sol   # each call as its own tra
 ```
 
 `foundry.toml` turns off forge's lint-on-build (`[lint] lint_on_build = false`). With it on, the linter runs out of memory on `PleaHook`.
+
+**Gas per flow** (`test_gasBenchmark` in the fork rehearsal: Ethereum's gas schedule against the live Sepolia contracts, 280-byte texts with quotes):
+
+| Flow | Gas |
+|---|---|
+| Buy (first, sIMD cashback included) | 0.94M |
+| Plea from the site | 0.76M |
+| Letter (a typical ~85-byte letter: 1.28M) | 1.46M |
+| Appeal letter | 1.75M |
+| Verdict delivery (the Intake's callback) | 0.19M |
+| Sale from the site / `deliver` of a letter (records the points) | 0.60M / 0.83M |
+| `record` | 0.21M |
+
+The mainnet gas pass (escaping only the plea texts in the oracle question, unchecked byte reads in the text rules, the hook's price views reading one checkpoint, a one-slot escrow) cut these by up to half without changing any behaviour; `test/GasPass.t.sol` holds each change to the code it replaced.
 
 ---
 

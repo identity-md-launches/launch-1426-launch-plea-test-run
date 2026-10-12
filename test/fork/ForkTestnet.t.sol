@@ -605,6 +605,61 @@ contract ForkTestnetTest is Test {
         plea.transfer(w[1], 1e18);
     }
 
+    // ---------------------------------------------------------------- gas benchmark
+
+    /// @dev 280 bytes (the maximum), with quotes and a backslash so the JSON escaping works too.
+    function _longText(string memory head) internal pure returns (string memory s) {
+        s = string.concat(head, ' I wrote "please" twice\\ and meant it. ');
+        while (bytes(s).length < 280) s = string.concat(s, "x");
+        assembly {
+            mstore(s, 280)
+        }
+    }
+
+    /// The gas of each user flow on Ethereum's schedule, against the live Sepolia contracts, with
+    /// the longest allowed texts: a reference for the mainnet gas pass.
+    function test_gasBenchmark() public {
+        address a = w[0];
+        address b = w[1];
+        uint256 g = gasleft();
+        buy(a, 200e18);
+        emit log_named_uint("gas: buy (first)", g - gasleft());
+        buy(b, 200e18);
+        _warp(_now() + 1 days);
+
+        // The site: plea, answer, sale, points.
+        uint256 amount = _amount(a);
+        string memory t = _longText("Site plea:");
+        vm.prank(a);
+        g = gasleft();
+        uint256 id = gate.submitSell(amount, t);
+        emit log_named_uint("gas: site plea (280 B)", g - gasleft());
+        g = gasleft();
+        answer(gate.getPlea(id).intakeId, 45);
+        emit log_named_uint("gas: verdict delivery", g - gasleft());
+        vm.prank(a);
+        g = gasleft();
+        gate.executeSell(0);
+        emit log_named_uint("gas: site sale", g - gasleft());
+        g = gasleft();
+        seasons.record(id);
+        emit log_named_uint("gas: record", g - gasleft());
+
+        // Letters: plea, runner's delivery; denial, appeal letter.
+        (uint256 l, uint256 gasLetter) = _letter(b, bytes(_longText("Letter:")));
+        emit log_named_uint("gas: letter (280 B)", gasLetter);
+        answer(gate.getPlea(l).intakeId, 45);
+        vm.prank(makeAddr("runner"));
+        g = gasleft();
+        letterbox.deliver(l);
+        emit log_named_uint("gas: deliver", g - gasleft());
+        _warp(_now() + 4 hours + 1);
+        (uint256 l2,) = _letter(b, bytes(_longText("Second letter:")));
+        answer(gate.getPlea(l2).intakeId, 0);
+        (, uint256 gasAppeal) = _letter(b, bytes(string.concat("APPEAL ", _longText("Appeal:"))));
+        emit log_named_uint("gas: appeal letter (280 B)", gasAppeal);
+    }
+
     // ---------------------------------------------------------------- letters
 
     function _letter(address who, bytes memory text) internal returns (uint256 id, uint256 gasUsed) {
