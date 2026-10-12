@@ -228,7 +228,7 @@ contract LetterboxTest is Fixture {
         vm.expectRevert(CabalGate.NotLetterbox.selector);
         gate.submitFor(alice, 1e18, 1e20, "x", 3, 0, 0);
         vm.expectRevert(CabalGate.NotLetterbox.selector);
-        gate.appealFor(alice, 1, 1e20, "x", 3, 0, 0);
+        gate.appealFor(alice, 1, 1e18, 1e20, "x", 3, 0, 0);
         vm.expectRevert(CabalGate.NotLetterbox.selector);
         gate.executeSellFor(1, 0);
         vm.prank(address(letterbox));

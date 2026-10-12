@@ -48,6 +48,11 @@ abstract contract ManifestFixture is Test {
     /// a launch's gas limit (limit / used was 1.175-1.214 on its last four launches).
     uint256 constant TX_GAS_CAP = 16_777_216;
     uint256 constant IMD_GAS_HEADROOM_BPS = 12_200;
+    /// @dev What IMD's real ProjectFactory adds to the five CREATE2s below (decoding and copying
+    /// the codes, names and metadata, the registry record). Measured by sending these five codes
+    /// through the mainnet ProjectFactory 0xfF03...7120 on a fork (2026-10-12): 12,575,870 gas
+    /// against 11,581,323 here, so 994,547; eth_estimateGas on mainnet asked for 11,513,828.
+    uint256 constant IMD_FACTORY_OVERHEAD = 1_100_000;
 
     ManifestFactory factory;
     address owner;
@@ -161,8 +166,9 @@ abstract contract ManifestFixture is Test {
 
 contract AtomicManifestTest is ManifestFixture {
     /// The five-contract launch in one factory transaction, measured as the chain charges it: the
-    /// init codes come in as transaction data (EIP-2028) and execute from memory. It must fit under
-    /// Ethereum's 16,777,216-gas cap even with the headroom IMD's deployer adds to the gas limit.
+    /// init codes come in as transaction data (EIP-2028) and execute from memory, plus the real
+    /// factory's measured overhead. It must fit under Ethereum's 16,777,216-gas cap even with the
+    /// headroom IMD's deployer adds to the gas limit.
     function test_factoryDeploysExactManifestOnAnEmptySepoliaChain() public {
         assertEq(
             INTAKE.code.length + ORACLE_ASSET.code.length + IMD.code.length + POOL_MANAGER.code.length
@@ -173,9 +179,9 @@ contract AtomicManifestTest is ManifestFixture {
         uint256 dataGas = _txDataGas(abi.encodeCall(ManifestFactory.deployAll, (m)));
         uint256 before = gasleft();
         address[5] memory deployed = factory.deployAll(m);
-        uint256 txGas = 21_000 + dataGas + (before - gasleft());
+        uint256 txGas = 21_000 + dataGas + (before - gasleft()) + IMD_FACTORY_OVERHEAD;
         uint256 limit = txGas * IMD_GAS_HEADROOM_BPS / 10_000;
-        emit log_named_uint("five-contract launch transaction gas", txGas);
+        emit log_named_uint("five-contract launch transaction gas through IMD's factory", txGas);
         emit log_named_uint("gas limit with IMD's headroom", limit);
         emit log_named_int("margin to the 16,777,216 cap", int256(TX_GAS_CAP) - int256(limit));
         assertLt(limit, TX_GAS_CAP, "the launch must fit one mainnet transaction");

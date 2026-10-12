@@ -322,11 +322,12 @@ contract CabalGate is OracleAttestationConsumer {
         _payAppeal(id);
     }
 
-    /// @notice The Letterbox appeals `originalId` for its seller, for the original amount; the fees
-    /// (oracle, wall share) come from the seller's PLEA as in `submitFor`.
+    /// @notice The Letterbox appeals `originalId` for its seller, for at most the original amount;
+    /// the fees (oracle, wall share) come from the seller's PLEA as in `submitFor`.
     function appealFor(
         address seller,
         uint256 originalId,
+        uint256 amount,
         uint256 balance,
         string calldata text,
         uint8 flags,
@@ -334,7 +335,7 @@ contract CabalGate is OracleAttestationConsumer {
         uint256 maxFeePlea
     ) external returns (uint256 id, uint256 feePlea) {
         _onlyLetterbox(flags);
-        id = _appeal(seller, originalId, pleas[originalId].amount, balance, text);
+        id = _appeal(seller, originalId, amount, balance, text);
         _flag(id, flags);
         feePlea = _swapFee(seller, feeImd, maxFeePlea);
         _payAppeal(id);

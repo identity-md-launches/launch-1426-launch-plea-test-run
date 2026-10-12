@@ -117,6 +117,7 @@ contract Letterbox is ReentrancyGuardTransient {
     uint256 internal constant ORACLE_FEE = 0.5e18;
     uint256 internal constant APPEAL_FEE = 0.35e18;
     uint256 internal constant MAX_SELL = 2_500_000e18;
+    uint256 internal constant MAX_SHARE_BPS = 5_000;
     uint256 internal constant WINDOW = 7 minutes;
     uint256 internal constant COOLDOWN = 4 hours;
     uint8 internal constant BY_LETTER = 1;
@@ -285,13 +286,15 @@ contract Letterbox is ReentrancyGuardTransient {
         _settleOpen(writer);
         uint256 amount = gate.getPlea(originalId).amount;
         uint256 bal = plea.balanceOf(writer);
+        // The original amount, or the gate's 50% of the balance when the fee sales left less.
+        if (amount > bal * MAX_SHARE_BPS / BPS) amount = bal * MAX_SHARE_BPS / BPS;
         _requireWorthTheFee(amount);
         (uint256 feeImd, uint256 maxFeePlea) = feesFor(true);
         if (maxFeePlea * BPS > bal * MAX_FEE_SHARE_BPS) revert FeeTooHigh(maxFeePlea, bal);
         plea.courtTake(writer, amount + maxFeePlea);
         _approveGate(maxFeePlea, true);
         uint256 feePlea;
-        (id, feePlea) = gate.appealFor(writer, originalId, bal, text, flags, feeImd, maxFeePlea);
+        (id, feePlea) = gate.appealFor(writer, originalId, amount, bal, text, flags, feeImd, maxFeePlea);
         _open(id, writer, amount, maxFeePlea - feePlea, feePlea, flags);
     }
 
