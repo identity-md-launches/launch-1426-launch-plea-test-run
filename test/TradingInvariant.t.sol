@@ -264,10 +264,22 @@ contract TradingHandler is Test {
         uint160 price = hook.currentSqrtPriceX96();
         uint256 cap = hook.inventoryCap();
         vm.prank(keeper);
-        hook.rebalance();
-        assertEq(hook.currentSqrtPriceX96(), price, "moving liquidity must not move spot price");
-        assertEq(hook.inventoryCap(), cap);
-        ++rebalanceCalls;
+        try hook.rebalance() {
+            assertEq(hook.currentSqrtPriceX96(), price, "moving liquidity must not move spot price");
+            assertEq(hook.inventoryCap(), cap);
+            ++rebalanceCalls;
+        } catch (bytes memory err) {
+            // A reserve waits but no band can be placed: the price sits at a tick extreme after a
+            // draining sell (possible only once the Cabal is dead), there are no claims to redeem
+            // and no wall to close, so the hook reports that the call did no work. Nothing moved.
+            assertEq(bytes4(err), PleaHook.RebalanceNotNeeded.selector, "only the documented no-work revert");
+            assertFalse(gate.cabalAlive(), "a drained pool needs a free sell");
+            assertEq(hook.retainClaims(), 0);
+            (,, uint128 wallLiquidity) = hook.wall();
+            assertEq(wallLiquidity, 0);
+            assertGe(hook.retainedImd(), 1e18, "the reserve that pendingRebalance saw");
+            assertEq(hook.currentSqrtPriceX96(), price);
+        }
     }
 
     function pauseCashback(bool paused) external {
