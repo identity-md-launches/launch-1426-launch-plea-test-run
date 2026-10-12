@@ -418,7 +418,10 @@ contract Letterbox is ReentrancyGuardTransient {
         id = gate.lastPleaOf(writer);
         if (id == 0) return 0;
         CabalGate.Plea memory p = gate.getPlea(id);
-        if (p.isAppeal && p.status == CabalGate.Status.Expired) id = p.originalId;
+        if (
+            p.isAppeal
+                && (p.status == CabalGate.Status.Expired || (p.status == CabalGate.Status.Pending && _settleable(id)))
+        ) id = p.originalId;
     }
 
     /// @dev `d` is `word` alone, or `word` followed by a space or a newline.

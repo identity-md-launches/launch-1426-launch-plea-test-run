@@ -203,6 +203,14 @@ contract AtomicManifestTest is ManifestFixture {
         _assertWiring();
     }
 
+    /// The launch recipe encodes bools as decimal/hex static words, never JSON words.
+    function test_launchJsonEncodesOracleMintFlagAsStaticWord() public view {
+        string memory json = vm.readFile("launch.json");
+        string memory flag = vm.parseJsonString(json, ".contracts[4].constructorArgs[10]");
+        assertEq(flag, "1", "the Sepolia mint flag must be the static bool word 1");
+        assertEq(abi.encode(vm.parseUint(flag)), abi.encode(MINT_ORACLE_FEE));
+    }
+
     /// launch.json commits to this build's Letterbox: its code hash argument must match.
     function test_launchJsonCommitsToThisLetterbox() public view {
         string memory json = vm.readFile("launch.json");

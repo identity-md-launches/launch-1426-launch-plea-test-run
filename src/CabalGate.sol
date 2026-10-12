@@ -161,6 +161,9 @@ contract CabalGate is OracleAttestationConsumer {
     mapping(address => uint256) public lastLapsedAt;
     /// @notice Each seller's newest plea or appeal (what a letter's APPEAL refers to).
     mapping(address => uint256) public lastPleaOf;
+    /// @dev The pre-escrow balance used to validate a plea. An appeal's minimum cannot grow
+    /// beyond the original basis when its seller acquires more PLEA after the denial.
+    mapping(uint256 => uint256) private pleaBalance;
     bool private callbackExpected;
 
     constructor(
@@ -355,7 +358,10 @@ contract CabalGate is OracleAttestationConsumer {
         if (o.appealed) revert AlreadyAppealed();
         if (pendingOf[seller] != 0) revert PendingExists();
         if (amount > o.amount) revert AmountTooLarge();
-        _checkAmount(amount, bal);
+        uint256 originalBalance = pleaBalance[originalId];
+        // The original amount already obeyed its own 50% ceiling. Using the lesser balance
+        // keeps today's 50% ceiling and the lesser of today's and the original 1% minimum.
+        _checkAmount(amount, bal < originalBalance ? bal : originalBalance);
         _validateText(text);
         o.appealed = true;
         id = _open(seller, amount, text, originalId, bal);
@@ -399,6 +405,7 @@ contract CabalGate is OracleAttestationConsumer {
         p.originalId = uint64(originalId);
         p.submittedAt = uint64(block.timestamp);
         p.text = text;
+        pleaBalance[id] = bal;
         pendingOf[seller] = id;
         lastPleaOf[seller] = id;
     }
