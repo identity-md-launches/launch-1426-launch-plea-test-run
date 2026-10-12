@@ -45,7 +45,7 @@ interface IIntakeV2 {
         returns (address payer, address callbackTarget, bytes4 callbackSelector, bool completed);
 }
 
-/// Testnet run 2 rehearsal on a Sepolia fork: deploys the six launch contracts with the values in
+/// Testnet run 3 rehearsal on a Sepolia fork: deploys the seven launch contracts with the values in
 /// launch.json (only the oracle signer is a test key, so answers can be signed here), mines and
 /// deploys the hook, seeds, and drives every plea outcome through the live Intake v2, completed by
 /// impersonating its writer exactly as the plane does. Uses the live PoolManager, PoolSwapTest,
@@ -340,13 +340,14 @@ contract ForkTestnetTest is Test {
         (uint256 id, bytes32 rid) = plead(a);
         answer(rid, 0);
         assertEq(uint8(_status(id)), uint8(CabalGate.Status.Denied));
+        uint256 amount = gate.getPlea(id).amount; // an appeal may not ask for more, nor under 1%
         vm.prank(a);
-        uint256 ap = gate.appeal(id, 1e18, "Please reconsider; I keep the rest.");
+        uint256 ap = gate.appeal(id, amount, "Please reconsider; I keep the rest.");
         fail(gate.getPlea(ap).intakeId, 2, bytes32("disagreed"), 12, 30);
         assertEq(uint8(_status(ap)), uint8(CabalGate.Status.Expired));
         assertFalse(gate.getPlea(id).appealed);
         vm.prank(a);
-        uint256 retry = gate.appeal(id, 1e18, "Asking once more, in my own words.");
+        uint256 retry = gate.appeal(id, amount, "Asking once more, in my own words.");
         answer(gate.getPlea(retry).intakeId, 45);
         assertEq(uint8(_status(retry)), uint8(CabalGate.Status.Approved));
     }
@@ -602,5 +603,83 @@ contract ForkTestnetTest is Test {
         // and wallets can move PLEA freely
         vm.prank(a);
         plea.transfer(w[1], 1e18);
+    }
+
+    // ---------------------------------------------------------------- letters
+
+    function _letter(address who, bytes memory text) internal returns (uint256 id, uint256 gasUsed) {
+        uint256 g = gasleft();
+        vm.prank(who);
+        (bool ok, bytes memory ret) = address(letterbox).call(text);
+        gasUsed = g - gasleft();
+        if (!ok) {
+            assembly {
+                revert(add(ret, 32), mload(ret))
+            }
+        }
+        id = gate.lastPleaOf(who);
+    }
+
+    /// A letter sent as raw calldata pleads through the live Intake v2 (the Letterbox mints the
+    /// Sepolia oracle fee and buys the tip with the writer's PLEA); a stranger delivers the
+    /// approval for the tip; the writer gets the IMD and the points.
+    function test_letterThroughTheLiveIntakeIsDeliveredByARunner() public {
+        address a = w[1];
+        buy(a, 50e18);
+        _warp(_now() + 1 days);
+        uint256 bal = plea.balanceOf(a);
+        uint256 paidBefore = IERC20(ORACLE_IMD).balanceOf(INTAKE);
+        (uint256 id, uint256 gasLetter) =
+            _letter(a, "I bought at the launch and held a day; one tenth pays for my bike repair, the rest stays.");
+        emit log_named_uint("letter gas", gasLetter);
+        CabalGate.Plea memory p = gate.getPlea(id);
+        assertEq(p.amount, bal / 10);
+        assertEq(p.flags, 3);
+        (address payer,,, bool done) = intake.requests(p.intakeId);
+        assertEq(payer, address(gate));
+        assertFalse(done);
+        assertGe(IERC20(ORACLE_IMD).balanceOf(INTAKE) + 1, paidBefore, "the Intake was paid");
+        assertEq(IMD.balanceOf(address(letterbox)), 0.25e18, "tip held");
+        answer(p.intakeId, 40);
+        address runner = makeAddr("runner");
+        uint256 imdBefore = IMD.balanceOf(a);
+        uint256 g = gasleft();
+        vm.prank(runner);
+        uint256 out = letterbox.deliver(id);
+        emit log_named_uint("deliver gas", g - gasleft());
+        assertEq(IMD.balanceOf(a) - imdBefore, out);
+        assertGe(out * 10_000, _spotValue(bal / 10) * 9_500, "at least 95% of spot");
+        assertEq(IMD.balanceOf(runner), 0.25e18);
+        assertTrue(seasons.recorded(id));
+        assertEq(plea.balanceOf(address(letterbox)), 0);
+        assertEq(IMD.balanceOf(address(letterbox)), 0);
+    }
+
+    /// Denied by letter, appealed by letter (the wall share bought with PLEA), the appeal gets no
+    /// verdict through the live Intake: settle gives the writer back the escrow and the tip.
+    function test_letterDenialAppealAndNoVerdictSettle() public {
+        address a = w[2];
+        buy(a, 50e18);
+        _warp(_now() + 1 days);
+        (uint256 id,) = _letter(a, "One tenth to pay back a friend; nine tenths stay with me through the season.");
+        answer(gate.getPlea(id).intakeId, 0);
+        assertEq(uint8(_status(id)), uint8(CabalGate.Status.Denied));
+        uint256 wall = hook.retainedImd();
+        (uint256 ap, uint256 gasAppeal) =
+            _letter(a, "APPEAL My friend lent me rent money in July; this tenth repays her, the rest stays.");
+        emit log_named_uint("appeal letter gas", gasAppeal);
+        assertEq(gate.getPlea(ap).originalId, id);
+        assertEq(hook.retainedImd() - wall, 0.35e18);
+        (, bool openOld,,) = letterbox.escrowOf(id);
+        assertFalse(openOld, "the denied plea's escrow went back first");
+        uint256 pleaBefore = plea.balanceOf(a);
+        uint256 imdBefore = IMD.balanceOf(a);
+        (,, uint256 amount,) = letterbox.escrowOf(ap);
+        fail(gate.getPlea(ap).intakeId, 2, bytes32("disagreed"), 12, 28);
+        assertEq(uint8(_status(ap)), uint8(CabalGate.Status.Expired));
+        letterbox.settle(ap);
+        assertEq(plea.balanceOf(a) - pleaBefore, amount);
+        assertEq(IMD.balanceOf(a) - imdBefore, 0.25e18);
+        assertTrue(vm.contains(letterbox.status(a), "NO VERDICT"), letterbox.status(a));
     }
 }
