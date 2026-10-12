@@ -8,6 +8,7 @@ import {Letterbox} from "../src/Letterbox.sol";
 import {Laureates} from "../src/Laureates.sol";
 import {Seasons} from "../src/Seasons.sol";
 import {PleaHook} from "../src/PleaHook.sol";
+import {MockIMD} from "./utils/Mocks.sol";
 
 /// Letters and auto-sell: plead by sending text to the Letterbox, fees paid in PLEA, escrow,
 /// `deliver` by anyone for the tip, `settle` for every other ending.
@@ -482,5 +483,55 @@ contract OwnerExclusionTest is Fixture {
         vm.prank(OWNER);
         hook.rebalance();
         assertEq(imd.balanceOf(OWNER), before, "no tip for the owner");
+    }
+}
+
+/// The mainnet path: the oracle fee asset is the pool IMD, so a letter buys the oracle fee with PLEA
+/// together with the tip (no minting), and the Letterbox refuses to mint on chain id 1.
+contract LetterboxMainnetPathTest is Fixture {
+    function oracleFeeToken() internal view override returns (MockIMD) {
+        return imd;
+    }
+
+    function setUp() public virtual override {
+        super.setUp();
+        buy(alice, 50e18);
+        skip(1 days);
+    }
+
+    function test_letterBuysTheOracleFeeAndTheTipWithPlea() public {
+        (uint256 feeImd, uint256 maxFeePlea) = letterbox.feesFor(false);
+        assertEq(feeImd, 0.5e18 + 0.25e18, "oracle fee + tip");
+        uint256 bal = plea.balanceOf(alice);
+        uint256 intakeBefore = imd.balanceOf(intake.PAY_TO());
+        vm.prank(alice);
+        (bool ok,) = address(letterbox).call("One tenth for a new phone; nine tenths stay with me all season.");
+        assertTrue(ok);
+        uint256 id = gate.lastPleaOf(alice);
+        assertEq(imd.balanceOf(intake.PAY_TO()) - intakeBefore, 0.5e18, "the Intake was paid in IMD");
+        assertEq(imd.balanceOf(address(letterbox)), 0.25e18, "only the tip stays");
+        uint256 feePlea = bal - bal / 10 - plea.balanceOf(alice);
+        assertLe(feePlea, maxFeePlea);
+        (feeImd,) = letterbox.feesFor(true);
+        assertEq(feeImd, 0.5e18 + 0.35e18 + 0.25e18, "an appeal also buys the wall share");
+        answer(id, 0);
+        uint256 wall = hook.retainedImd();
+        vm.prank(alice);
+        (ok,) = address(letterbox).call("APPEAL The phone is how I work; I keep the rest.");
+        assertTrue(ok);
+        assertEq(hook.retainedImd() - wall, 0.35e18);
+        assertEq(imd.balanceOf(address(letterbox)), 0.25e18);
+    }
+
+    function test_mintingTheFeeIsRefusedOnMainnet() public {
+        vm.chainId(1);
+        vm.expectRevert(Letterbox.MintOnMainnet.selector);
+        new Letterbox(
+            address(plea), address(gate), address(seasons), address(laureates), address(imd), address(oimd), true
+        );
+        vm.expectRevert(Letterbox.OracleAssetNotImd.selector);
+        new Letterbox(
+            address(plea), address(gate), address(seasons), address(laureates), address(imd), address(oimd), false
+        );
     }
 }

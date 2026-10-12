@@ -52,6 +52,12 @@ contract Fixture is Test {
 
     function setTimings() internal virtual {}
 
+    /// @dev Sepolia: a separate oracle fee token (the Letterbox mints the fee). Mainnet path: return
+    /// the pool IMD, so the Letterbox buys the oracle fee with PLEA like the tip.
+    function oracleFeeToken() internal view virtual returns (MockIMD) {
+        return oimd;
+    }
+
     function creditGasBudget() internal pure virtual returns (uint256) {
         return CREDIT_GAS;
     }
@@ -71,7 +77,7 @@ contract Fixture is Test {
         oimd = new MockIMD();
         simd = new MockSIMD();
         stacker = new MockStacker(imd, simd);
-        intake = new MockIntake(oimd);
+        intake = new MockIntake(oracleFeeToken());
         deployLaunch();
         deployHook();
         vm.prank(OWNER);
@@ -105,12 +111,21 @@ contract Fixture is Test {
 
     function deployLaunch() internal {
         plea = new PLEA(OWNER);
-        gate = new CabalGate(address(plea), address(intake), address(oimd), address(imd), SIGNER, SEASON, DEADMAN);
+        gate = new CabalGate(
+            address(plea), address(intake), address(oracleFeeToken()), address(imd), SIGNER, SEASON, DEADMAN
+        );
         seasons = new Seasons(address(plea), address(gate), address(imd));
         laureates = new Laureates(address(plea));
         distributor = new PleaDistributor(address(plea), OWNER);
+        MockIMD feeToken = oracleFeeToken();
         letterbox = new Letterbox(
-            address(plea), address(gate), address(seasons), address(laureates), address(imd), address(oimd), true
+            address(plea),
+            address(gate),
+            address(seasons),
+            address(laureates),
+            address(imd),
+            address(feeToken),
+            feeToken != imd
         );
         launch = new PleaLaunch(
             address(plea),
