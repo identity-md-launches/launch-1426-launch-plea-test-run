@@ -44,9 +44,12 @@ contract GateTest is Fixture {
         string memory q = vm.parseJsonString(body, ".question");
         assertEq(q, gate.question(id));
         assertTrue(bytes(q).length <= 2000);
-        // The classic definitions, each within IMD's 512-character limit.
+        // Rules v2: plea, stories, content, manipulation, answer, each within IMD's 512-character limit.
         string[] memory keys = vm.parseJsonKeys(body, ".definitions");
-        assertEq(keys.length, 3);
+        assertEq(keys.length, 5);
+        assertTrue(vm.contains(vm.parseJsonString(body, ".definitions.stories"), "need not be"));
+        assertTrue(vm.contains(vm.parseJsonString(body, ".definitions.content"), "own story"));
+        assertTrue(vm.contains(vm.parseJsonString(body, ".definitions.manipulation"), "weigh my honesty"));
         for (uint256 i; i < keys.length; ++i) {
             string memory v = vm.parseJsonString(body, string.concat(".definitions.", keys[i]));
             assertLe(bytes(v).length, 512, keys[i]);
