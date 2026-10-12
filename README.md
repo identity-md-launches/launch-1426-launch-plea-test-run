@@ -81,9 +81,11 @@ All three are the same letter: `letter(text)` reads its text exactly like raw in
 | Letter | Effect |
 |---|---|
 | any text | A new plea for **10% of your PLEA** (within the 2.5M cap), **sold automatically** if approved |
-| `APPEAL <text>` | Appeals your latest denied plea, inside its 4-hour window, for the original amount |
+| `APPEAL <text>` | Appeals your latest denied plea, inside its 4-hour window, for the original amount (at most 35% of your balance now); an appeal that got no verdict can be sent again |
 | `SELL` | Sells your own approved letter plea yourself, if no runner has yet |
-| `NAME <name>` | Sets your display name (3–20 characters `a-z 0-9 _`, unique; also `setName` on the Letterbox) |
+| `NAME <name>` | Sets your display name (3–20 characters `a-z 0-9 _`, unique; also `setName` on the Letterbox); `NAME` alone clears it |
+
+A command word is matched in capitals at the very start, followed by a space, a newline or nothing; a bare command word never becomes a paid plea. A plea's text is one line: newlines inside it are refused.
 
 - **Fees are paid in PLEA, in the letter's own transaction.** The gate sells just enough of your PLEA, through the hook with the normal 1.75% fee and your own 0.5% cashback, for exactly the IMD needed: the 0.5 IMD oracle fee, a **0.25 IMD runner tip** and, for an appeal, the 0.35 IMD wall share. It may spend at most the hourly snapshot value **+10%**; unspent PLEA comes straight back. A letter whose fees would take more than 10% of your PLEA, or whose 10% is under 1,000 PLEA, is refused. On Sepolia the oracle fee token is a separate test token, so the Letterbox mints that 0.5 instead of buying it.
 - **Escrow.** The plea's PLEA waits in the Letterbox. It keeps its buy record: only the final sale reduces it.
@@ -209,7 +211,7 @@ Then:
 | Cashback credit gas | 1,300,000 (Sepolia's gas schedule) |
 | Letterbox | mints the 0.5 test oracle fee itself (`mintOracleFee = true`; refused on chain id 1, where the fee is bought with PLEA like the tip) |
 
-The manifest rehearsal measures the launch as the chain charges it (the init codes as transaction data, then their execution): **11,581,729 gas**, and **14,129,709** with the 22% headroom IMD's deployer adds to a gas limit, under the 16,777,216 cap; the test asserts it. `deployLetterbox` is its own transaction of about **4.8M** gas, `deployHook` about **5.4M** on Ethereum's schedule. `test/fork/ForkTestnet.t.sol` rehearses the whole run on a Sepolia fork against the live Intake v2:
+The manifest rehearsal measures the launch as the chain charges it (the init codes as transaction data, then their execution) plus the overhead of IMD's real factory, measured by sending these five codes through the mainnet ProjectFactory on a fork (994,547 gas; the test adds 1.1M): about **12.7M gas**, and about **15.5M** with the 22% headroom IMD's deployer adds to a gas limit, under the 16,777,216 cap; the test asserts it. `deployLetterbox` is its own transaction of about **4.8M** gas, `deployHook` about **5.4M** on Ethereum's schedule. `test/fork/ForkTestnet.t.sol` rehearses the whole run on a Sepolia fork against the live Intake v2:
 
 ```
 SEPOLIA_RPC_URL=https://ethereum-sepolia-rpc.publicnode.com forge test --match-path test/fork/ForkTestnet.t.sol -vv

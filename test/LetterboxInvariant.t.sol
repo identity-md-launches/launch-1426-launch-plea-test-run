@@ -285,7 +285,7 @@ contract LetterboxHandler is Test {
             _check(false, "a stranger pleaded for a writer");
         } catch {}
         vm.prank(stranger);
-        try gate.appealFor(w, last, 10e18, TEXT, 3, 0, 0) returns (uint256, uint256) {
+        try gate.appealFor(w, last, 1e18, 10e18, TEXT, 3, 0, 0) returns (uint256, uint256) {
             _check(false, "a stranger appealed for a writer");
         } catch {}
         vm.prank(stranger);

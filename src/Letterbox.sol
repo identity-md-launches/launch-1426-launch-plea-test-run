@@ -106,6 +106,7 @@ contract Letterbox is ReentrancyGuardTransient {
     uint256 internal constant ORACLE_FEE = 0.5e18;
     uint256 internal constant APPEAL_FEE = 0.35e18;
     uint256 internal constant MAX_SELL = 2_500_000e18;
+    uint256 internal constant MAX_SHARE_BPS = 3_500;
     uint256 internal constant WINDOW = 7 minutes;
     uint256 internal constant COOLDOWN = 4 hours;
     uint8 internal constant BY_LETTER = 1;
@@ -161,10 +162,10 @@ contract Letterbox is ReentrancyGuardTransient {
     }
 
     function _read(bytes calldata d) internal {
-        if (_isCommand(d, "APPEAL")) {
-            _appeal(msg.sender, gate.lastPleaOf(msg.sender), string(d[7:]), BY_LETTER | AUTO_SELL);
-        } else if (_isCommand(d, "NAME")) {
-            _setName(msg.sender, d[5:]);
+        if (_isWord(d, "APPEAL")) {
+            _appeal(msg.sender, _appealTarget(msg.sender), string(_after(d, 6)), BY_LETTER | AUTO_SELL);
+        } else if (_isWord(d, "NAME")) {
+            _setName(msg.sender, _after(d, 4));
         } else if (_isWord(d, "SELL")) {
             uint256 id = _openOf[msg.sender];
             if (id == 0) revert NotOpen(0);
@@ -272,12 +273,14 @@ contract Letterbox is ReentrancyGuardTransient {
         _settleOpen(writer);
         uint256 amount = gate.getPlea(originalId).amount;
         uint256 bal = plea.balanceOf(writer);
+        // The original amount, or the gate's 35% of the balance when the fee sales left less.
+        if (amount > bal * MAX_SHARE_BPS / BPS) amount = bal * MAX_SHARE_BPS / BPS;
         (uint256 feeImd, uint256 maxFeePlea) = feesFor(true);
         if (maxFeePlea * BPS > bal * MAX_FEE_SHARE_BPS) revert FeeTooHigh(maxFeePlea, bal);
         plea.courtTake(writer, amount + maxFeePlea);
         _approveGate(maxFeePlea, true);
         uint256 feePlea;
-        (id, feePlea) = gate.appealFor(writer, originalId, bal, text, flags, feeImd, maxFeePlea);
+        (id, feePlea) = gate.appealFor(writer, originalId, amount, bal, text, flags, feeImd, maxFeePlea);
         _open(id, writer, amount, maxFeePlea - feePlea, feePlea, flags);
     }
 
@@ -377,11 +380,18 @@ contract Letterbox is ReentrancyGuardTransient {
         if (p == 0) revert NoPrice();
     }
 
-    /// @dev `d` starts with `word` followed by a space or a newline.
-    function _isCommand(bytes calldata d, bytes memory word) internal pure returns (bool) {
-        uint256 n = word.length;
-        if (d.length <= n || (d[n] != " " && d[n] != "\n")) return false;
-        return keccak256(d[:n]) == keccak256(word);
+    /// @dev The text after a command word of `n` bytes and its separator; empty for the bare word.
+    function _after(bytes calldata d, uint256 n) internal pure returns (bytes calldata) {
+        return d.length > n + 1 ? d[n + 1:] : d[d.length:];
+    }
+
+    /// @dev What an APPEAL letter appeals: the writer's newest plea, or, when that is an appeal the
+    /// oracle never answered (the gate lets the writer retry it), the denied plea it appealed.
+    function _appealTarget(address writer) internal view returns (uint256 id) {
+        id = gate.lastPleaOf(writer);
+        if (id == 0) return 0;
+        CabalGate.Plea memory p = gate.getPlea(id);
+        if (p.isAppeal && p.status == CabalGate.Status.Expired) id = p.originalId;
     }
 
     /// @dev `d` is `word` alone, or `word` followed by a space or a newline.
