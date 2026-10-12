@@ -37,8 +37,10 @@ interface IMintable {
 }
 
 /// @title Letterbox — plead to the Cabal by sending a letter
-/// @notice A letter is a transaction to this contract whose input data is the plea text (UTF-8).
-/// The writer is always the sender. The first word decides what it does:
+/// @notice A letter is a transaction to this contract whose input data is the plea text (UTF-8),
+/// as a wallet's data field or an explorer's message (IDM) page sends it, or the same text passed
+/// to `letter(text)` from an explorer's Write Contract tab. The writer is always the sender. The
+/// first word decides what it does:
 ///   any other text   a new plea for 10% of the writer's PLEA, sold automatically if approved;
 ///   `APPEAL <text>`  an appeal of the writer's latest denied plea, for its original amount;
 ///   `SELL`           the writer sells their own approved letter plea (if no runner did yet);
@@ -138,7 +140,16 @@ contract Letterbox is ReentrancyGuardTransient {
 
     /// @notice A letter: the input data is the text. ETH is refused (the function is not payable).
     fallback() external nonReentrant {
-        bytes calldata d = msg.data;
+        _read(msg.data);
+    }
+
+    /// @notice The same letter typed into a block explorer's Write Contract tab: `text` is read
+    /// exactly like a letter's input data (a plea, `APPEAL <text>`, `SELL` or `NAME <name>`).
+    function letter(string calldata text) external nonReentrant {
+        _read(bytes(text));
+    }
+
+    function _read(bytes calldata d) internal {
         if (_isCommand(d, "APPEAL")) {
             _appeal(msg.sender, gate.lastPleaOf(msg.sender), string(d[7:]), BY_LETTER | AUTO_SELL);
         } else if (_isCommand(d, "NAME")) {

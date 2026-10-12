@@ -32,7 +32,7 @@ Launched through the IMD swarm straight from this repository (`launch.open` with
 |---|---|
 | Supply | 1,000,000,000 PLEA (87% pool liquidity, 3% season bonus prizes, 10% Merkle distributor) |
 | Pool | PLEA/IMD on Uniswap v4 with a fork of POOL4's CappedBurnHook: LP fee 0, the hook is the only LP, liquidity locked forever |
-| Selling | Through the Cabal's gate while it lives, from the site or by sending a letter (a text transaction); owner-allowlisted senders are exempt |
+| Selling | Through the Cabal's gate while it lives, from the site or by sending a letter (a text transaction, e.g. from Etherscan); owner-allowlisted senders are exempt |
 | Judges | 30-seat oracle panel, quorum 17, score 0–45 |
 | Trade fee | 1.75%, paid inside the swap (0.5% back to the trader as staked IMD) |
 | Seasons | 15 days each, top 10 paid, top 5 pleas minted as NFTs |
@@ -68,7 +68,15 @@ While the Cabal lives, ordinary holders send PLEA through `CabalGate`. The owner
 
 ### Pleading by letter
 
-Anyone can plead straight from a wallet or a block explorer by sending a **letter**: a transaction to the `Letterbox` whose input data is the plea text (UTF-8). The writer is always the sender. Nothing to approve, nothing to sign but the letter.
+Anyone can plead straight from a block explorer or a wallet by sending a **letter** to the `Letterbox`. The writer is always the sender. Nothing to approve, no IMD needed: only the letter and its gas.
+
+| How to send it | What you do |
+|---|---|
+| Etherscan's message page ([etherscan.io/idm](https://etherscan.io/idm), mainnet) | "Send To" = the Letterbox, then type the letter: it goes out as the transaction's input data (an IDM) |
+| Etherscan's Write Contract tab | Open the Letterbox, connect your wallet, call `letter(text)` and type the letter in plain words (works on Sepolia too) |
+| A wallet's data field | Send 0 ETH to the Letterbox with the letter's UTF-8 bytes, in hex, as the data (MetaMask: Show hex data) |
+
+All three are the same letter: `letter(text)` reads its text exactly like raw input data.
 
 | Letter | Effect |
 |---|---|
@@ -154,7 +162,7 @@ Beyond fees, the hook keeps the market supplied the way POOL4's CappedBurnHook d
 | `Seasons` | Points, leaderboard, `closeSeason` payouts, the final flush to the buy wall. |
 | `Laureates` | ERC-721 for each season's top 5 pleas; display names. |
 | `PleaHook` | The only liquidity provider (fork of POOL4's CappedBurnHook, IMD side): fees, cap and trim burns, buy wall, price checkpoints. Deployed after launch. |
-| `Letterbox` | Letters and auto-sell: escrow, fees paid in PLEA, `deliver` for the runner's tip, `settle`, and the `status` / `leaderboard` text views. No owner. |
+| `Letterbox` | Letters (raw input data, or `letter(text)` from an explorer) and auto-sell: escrow, fees paid in PLEA, `deliver` for the runner's tip, `settle`, and the `status` / `leaderboard` text views. No owner. |
 | `PleaLaunch` | Registers the contracts (and the Letterbox) at launch and commits to the hook's init code; `deployHook` and `seed` afterwards. |
 | `PleaDistributor` | Merkle claims for the 10% swarm share. |
 | `OracleAttestation` | EIP-712 verification of the IdentityMD oracle's signed answer. |
@@ -197,7 +205,7 @@ Then:
 | Cashback credit gas | 1,300,000 (Sepolia's gas schedule) |
 | Letterbox | mints the 0.5 test oracle fee itself (`mintOracleFee = true`; refused on chain id 1, where the fee is bought with PLEA like the tip) |
 
-The seven-contract manifest rehearsal reports **24,298,045 gas**, a margin of **−7,520,829** against the 16,777,216 mainnet per-transaction cap. Sepolia accepts it in one transaction (launch #1242 used 81.8M there); the rehearsal reports the margin without enforcing the cap. This local measurement includes harness overhead and excludes transaction intrinsic gas; the deployment service must simulate the actual factory transaction. `test/fork/ForkTestnet.t.sol` rehearses the whole run on a Sepolia fork against the live Intake v2:
+The seven-contract manifest rehearsal reports **24,475,942 gas**, a margin of **−7,698,726** against the 16,777,216 mainnet per-transaction cap. Sepolia accepts it in one transaction (launch #1242 used 81.8M there); the rehearsal reports the margin without enforcing the cap. This local measurement includes harness overhead and excludes transaction intrinsic gas; the deployment service must simulate the actual factory transaction. `test/fork/ForkTestnet.t.sol` rehearses the whole run on a Sepolia fork against the live Intake v2:
 
 ```
 SEPOLIA_RPC_URL=https://ethereum-sepolia-rpc.publicnode.com forge test --match-path 'test/fork/*' -vv

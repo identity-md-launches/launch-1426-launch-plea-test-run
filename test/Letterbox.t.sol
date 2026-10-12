@@ -131,6 +131,59 @@ contract LetterboxTest is Fixture {
         assertGt(heldAfter, held - bal / 10, "the escrowed tenth still counts as held");
     }
 
+    function test_explorerLetterIsTheSameAsARawLetter() public {
+        // The same text, sent as input data (alice) and typed into `letter` on an explorer (bob).
+        string memory text = "A tenth for a new laptop; the other nine tenths stay with me all season.";
+        uint256 raw = letter(alice, bytes(text));
+        // Read after alice's letter: her fee sale moved the price, which is part of the fact score.
+        uint256 balB = plea.balanceOf(bob);
+        uint8 factB = gate.factScore(bob, balB / 10);
+        vm.prank(bob);
+        letterbox.letter(text);
+        uint256 typed = gate.lastPleaOf(bob);
+        CabalGate.Plea memory r = gate.getPlea(raw);
+        CabalGate.Plea memory t = gate.getPlea(typed);
+        assertEq(t.seller, bob);
+        assertEq(t.text, r.text);
+        assertEq(t.amount, balB / 10, "fixed 10%");
+        assertEq(t.factScore, factB, "scored on the balance before anything moved");
+        assertEq(t.flags, r.flags, "by letter, auto-sell");
+        (address w, bool open, uint256 amount) = escrowed(typed);
+        assertEq(w, bob);
+        assertTrue(open);
+        assertEq(amount, balB / 10);
+        assertEq(imd.balanceOf(address(letterbox)), 2 * TIP);
+
+        // APPEAL, SELL and NAME typed into `letter` work like the raw commands.
+        answer(typed, 0);
+        vm.prank(bob);
+        letterbox.letter("APPEAL Plainly: the laptop is how I work, and I keep the rest.");
+        uint256 a = gate.lastPleaOf(bob);
+        assertTrue(gate.getPlea(a).isAppeal);
+        assertEq(gate.getPlea(a).originalId, typed);
+        assertEq(gate.getPlea(a).amount, t.amount);
+        assertEq(gate.getPlea(a).text, "Plainly: the laptop is how I work, and I keep the rest.");
+        answer(a, 45);
+        uint256 imdBefore = imd.balanceOf(bob);
+        vm.prank(bob);
+        letterbox.letter("SELL");
+        assertEq(uint8(gate.getPlea(a).status), uint8(CabalGate.Status.Executed));
+        assertTrue(seasons.recorded(a));
+        assertGt(imd.balanceOf(bob) - imdBefore, TIP, "the sale and the writer's own tip");
+        vm.prank(bob);
+        letterbox.letter("NAME bob_by_explorer");
+        assertEq(laureates.nameOf(bob), "bob_by_explorer");
+
+        // The same refusals: a stranger's SELL, and ETH.
+        vm.prank(carol);
+        vm.expectRevert(abi.encodeWithSelector(Letterbox.NotOpen.selector, 0));
+        letterbox.letter("SELL");
+        vm.deal(carol, 1 ether);
+        vm.prank(carol);
+        (bool ok,) = address(letterbox).call{value: 1}(abi.encodeCall(Letterbox.letter, ("money")));
+        assertFalse(ok, "ETH is refused");
+    }
+
     function test_letterCommandsParse() public {
         // A lower-case command and a command without a separator are plain pleas.
         uint256 id = letter(alice, "sell, please: my tenth for new shoes, the rest stays with me.");

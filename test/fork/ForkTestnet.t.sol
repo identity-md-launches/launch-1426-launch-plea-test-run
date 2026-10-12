@@ -655,6 +655,35 @@ contract ForkTestnetTest is Test {
         assertEq(IMD.balanceOf(address(letterbox)), 0);
     }
 
+    /// The same letter typed into `letter(text)` on a block explorer pleads through the live Intake
+    /// v2; the writer's own `SELL`, typed the same way, sells it and returns the tip.
+    function test_explorerLetterThroughTheLiveIntake() public {
+        address a = w[3];
+        buy(a, 50e18);
+        _warp(_now() + 1 days);
+        uint256 bal = plea.balanceOf(a);
+        uint256 g = gasleft();
+        vm.prank(a);
+        letterbox.letter("Typed on Etherscan: one tenth pays my phone bill, the other nine tenths stay with me.");
+        emit log_named_uint("explorer letter gas", g - gasleft());
+        uint256 id = gate.lastPleaOf(a);
+        CabalGate.Plea memory p = gate.getPlea(id);
+        assertEq(p.seller, a);
+        assertEq(p.amount, bal / 10);
+        assertEq(p.flags, 3);
+        (address payer,,, bool done) = intake.requests(p.intakeId);
+        assertEq(payer, address(gate));
+        assertFalse(done);
+        answer(p.intakeId, 40);
+        uint256 imdBefore = IMD.balanceOf(a);
+        vm.prank(a);
+        letterbox.letter("SELL");
+        assertEq(uint8(_status(id)), uint8(CabalGate.Status.Executed));
+        assertGe((IMD.balanceOf(a) - imdBefore - 0.25e18) * 10_000, _spotValue(bal / 10) * 9_500, "sale + own tip");
+        assertTrue(seasons.recorded(id));
+        assertEq(IMD.balanceOf(address(letterbox)), 0);
+    }
+
     /// Denied by letter, appealed by letter (the wall share bought with PLEA), the appeal gets no
     /// verdict through the live Intake: settle gives the writer back the escrow and the tip.
     function test_letterDenialAppealAndNoVerdictSettle() public {
