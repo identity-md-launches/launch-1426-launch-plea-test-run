@@ -15,6 +15,7 @@ import {MockIMD} from "./utils/Mocks.sol";
 /// `deliver` by anyone for the tip, `settle` for every other ending.
 contract LetterboxTest is Fixture {
     uint256 constant TIP = 0.25e18;
+    uint256 constant AUTO_SELL_FEE = 0.35e18;
 
     function setUp() public virtual override {
         super.setUp();
@@ -101,7 +102,7 @@ contract LetterboxTest is Fixture {
 
     function test_letterPleadsTenPercentPaysFeesInPleaAndEscrows() public {
         uint256 bal = plea.balanceOf(alice);
-        uint8 fact = gate.factScore(alice, bal / 10);
+        uint8 fact = gate.factScore(alice, bal / 5);
         uint256 intakeBefore = oimd.balanceOf(intake.PAY_TO());
         (uint256 feeImd, uint256 maxFeePlea) = letterbox.feesFor(false);
         assertEq(feeImd, TIP, "Sepolia: the oracle fee is minted, only the tip is bought");
@@ -111,15 +112,15 @@ contract LetterboxTest is Fixture {
 
         CabalGate.Plea memory p = gate.getPlea(id);
         assertEq(p.seller, alice);
-        assertEq(p.amount, bal / 10, "fixed 10%");
+        assertEq(p.amount, bal / 5, "fixed 20%");
         assertEq(p.factScore, fact, "scored on the balance before anything moved");
         assertEq(p.flags, 3, "by letter, auto-sell");
         (address w, bool open, uint256 amount) = escrowed(id);
         assertEq(w, alice);
         assertTrue(open);
-        assertEq(amount, bal / 10);
-        assertEq(plea.balanceOf(address(letterbox)), bal / 10, "only the escrow stays");
-        uint256 feePlea = bal - bal / 10 - plea.balanceOf(alice);
+        assertEq(amount, bal / 5);
+        assertEq(plea.balanceOf(address(letterbox)), bal / 5, "only the escrow stays");
+        uint256 feePlea = bal - bal / 5 - plea.balanceOf(alice);
         assertGt(feePlea, 0);
         assertLe(feePlea, maxFeePlea, "fee swap within snapshot value + 10%");
         assertEq(imd.balanceOf(address(letterbox)), TIP, "the tip waits for the runner");
@@ -129,7 +130,7 @@ contract LetterboxTest is Fixture {
         // The fee swap is a sale by alice: it reduces her buy record; the escrow does not.
         (, uint256 heldAfter,) = hook.basisOf(alice);
         assertLt(heldAfter, held);
-        assertGt(heldAfter, held - bal / 10, "the escrowed tenth still counts as held");
+        assertGt(heldAfter, held - bal / 5, "the escrowed fifth still counts as held");
     }
 
     function test_explorerLetterIsTheSameAsARawLetter() public {
@@ -138,7 +139,7 @@ contract LetterboxTest is Fixture {
         uint256 raw = letter(alice, bytes(text));
         // Read after alice's letter: her fee sale moved the price, which is part of the fact score.
         uint256 balB = plea.balanceOf(bob);
-        uint8 factB = gate.factScore(bob, balB / 10);
+        uint8 factB = gate.factScore(bob, balB / 5);
         vm.prank(bob);
         letterbox.letter(text);
         uint256 typed = gate.lastPleaOf(bob);
@@ -146,13 +147,13 @@ contract LetterboxTest is Fixture {
         CabalGate.Plea memory t = gate.getPlea(typed);
         assertEq(t.seller, bob);
         assertEq(t.text, r.text);
-        assertEq(t.amount, balB / 10, "fixed 10%");
+        assertEq(t.amount, balB / 5, "fixed 20%");
         assertEq(t.factScore, factB, "scored on the balance before anything moved");
         assertEq(t.flags, r.flags, "by letter, auto-sell");
         (address w, bool open, uint256 amount) = escrowed(typed);
         assertEq(w, bob);
         assertTrue(open);
-        assertEq(amount, balB / 10);
+        assertEq(amount, balB / 5);
         assertEq(imd.balanceOf(address(letterbox)), 2 * TIP);
 
         // APPEAL, SELL and NAME typed into `letter` work like the raw commands.
@@ -246,10 +247,15 @@ contract LetterboxTest is Fixture {
         (,, uint256 amount) = escrowed(id);
         answer(id, 45);
         uint256 aliceImd = imd.balanceOf(alice);
+        uint256 potBefore = imd.balanceOf(address(seasons));
+        (, uint256 key,) = seasons.currentSeason();
+        uint256 feesBefore = seasons.seasonFees(key);
         vm.prank(keeper);
         uint256 out = letterbox.deliver(id);
         assertGt(out, 0);
-        assertEq(imd.balanceOf(alice) - aliceImd, out, "the IMD goes to the writer");
+        assertEq(imd.balanceOf(alice) - aliceImd, out, "the IMD goes to the writer, less the fee");
+        assertGe(imd.balanceOf(address(seasons)) - potBefore, AUTO_SELL_FEE, "the auto-sell fee reached the pot");
+        assertGe(seasons.seasonFees(key) - feesBefore, AUTO_SELL_FEE, "and is accounted to the running season");
         assertEq(imd.balanceOf(keeper), TIP, "the runner earns the tip");
         assertEq(imd.balanceOf(address(letterbox)), 0);
         assertEq(plea.balanceOf(address(letterbox)), 0);
@@ -289,6 +295,30 @@ contract LetterboxTest is Fixture {
         assertEq(imd.balanceOf(address(letterbox)), 0, "the tip went back to the writer");
         assertTrue(seasons.recorded(id));
         assertLetterReverts(bob, "SELL", abi.encodeWithSelector(Letterbox.NotOpen.selector, 0));
+    }
+
+    /// The auto-sell fee is only ever taken from a sale: a denial refunds everything but the fee
+    /// PLEA, and a plea worth less than twice the fee at the snapshot is refused up front.
+    function test_autoSellFeeOnlyOnASaleAndNeverMoreThanHalfOfIt() public {
+        uint256 pot = imd.balanceOf(address(seasons));
+        uint256 id = letter(alice, "A tenth for my rent this month; the rest stays in my wallet for good.");
+        answer(id, 0);
+        letterbox.settle(id);
+        assertLt(imd.balanceOf(address(seasons)) - pot, AUTO_SELL_FEE, "no auto-sell fee without a sale (only the trade's prize share)");
+        // The site's auto-sell: an amount worth less than 0.70 IMD at the snapshot is refused.
+        uint256 price = hook.latestPrice();
+        uint256 tooSmall = (0.7e18 - 1) * (1 << 96) / price;
+        vm.prank(bob);
+        vm.expectPartialRevert(Letterbox.TooSmallForTheFee.selector);
+        letterbox.plead(tooSmall, "A sliver for a coffee; the rest stays.");
+        uint256 justEnough = 0.72e18 * (1 << 96) / price;
+        vm.prank(bob);
+        uint256 small = letterbox.plead(justEnough, "A sliver for a coffee; the rest stays.");
+        answer(small, 45);
+        uint256 bobImd = imd.balanceOf(bob);
+        uint256 out = letterbox.deliver(small);
+        assertEq(imd.balanceOf(bob) - bobImd, out);
+        assertGe(out * 2 + 1, AUTO_SELL_FEE * 2 * 95 / 100, "the writer keeps at least about half");
     }
 
     function test_theGateRefusesAManualSaleOfAnEscrowedPlea() public {
@@ -374,6 +404,51 @@ contract LetterboxTest is Fixture {
         assertLetterReverts(alice, "APPEAL again", abi.encodeWithSelector(CabalGate.NotDenied.selector));
     }
 
+    /// An appeal the oracle never answered (failure or 20-minute expiry) may be retried, as the gate
+    /// allows: the APPEAL letter appeals the denied plea again, not the expired appeal.
+    function test_appealLetterRetriesAnAppealTheOracleNeverAnswered() public {
+        uint256 id = letter(alice, "A tenth for rent; the rest stays with me all season.");
+        answer(id, 0);
+        uint256 a = letter(alice, "APPEAL Plainly: the rent is due on Friday, and I keep the rest.");
+        assertTrue(intake.fail(intakeIdOf(a), 2, bytes32("disagreed"), 13, 28));
+        assertFalse(gate.getPlea(id).appealed);
+        uint256 retry = letter(alice, "APPEAL Once more: the rent is due on Friday; nine tenths stay.");
+        CabalGate.Plea memory p = gate.getPlea(retry);
+        assertTrue(p.isAppeal);
+        assertEq(p.originalId, id);
+        (, bool openOld,) = escrowed(a);
+        assertFalse(openOld, "the expired appeal's escrow was settled first");
+        answer(retry, 45);
+        letterbox.deliver(retry);
+        // An upheld appeal cannot be appealed again.
+        skip(4 hours);
+        uint256 d = letter(alice, "A tenth for rent; the rest stays with me all season.");
+        answer(d, 0);
+        uint256 u = letter(alice, "APPEAL The rent again.");
+        answer(u, 0);
+        assertLetterReverts(alice, "APPEAL once more", abi.encodeWithSelector(CabalGate.AlreadyAppealed.selector));
+    }
+
+    /// A command word alone is the command, never a plea: `NAME` clears the name (like `NAME `),
+    /// `APPEAL` with nothing to appeal is refused, and no PLEA moves.
+    function test_aBareCommandWordIsNotAPlea() public {
+        uint256 before = plea.balanceOf(alice);
+        vm.prank(alice);
+        letterbox.setName("alice_1");
+        (bool ok,) = send(alice, "NAME");
+        assertTrue(ok);
+        assertEq(letterbox.nameOf(alice), "");
+        assertLetterReverts(alice, "APPEAL", abi.encodeWithSelector(Letterbox.NothingToAppeal.selector));
+        assertEq(gate.lastPleaOf(alice), 0, "no plea was opened");
+        assertEq(plea.balanceOf(alice), before);
+        // With a denial to appeal, a bare APPEAL has no text and is refused by the gate.
+        uint256 id = letter(alice, "A tenth for rent; the rest stays with me all season.");
+        answer(id, 0);
+        assertLetterReverts(alice, "APPEAL", abi.encodeWithSelector(CabalGate.BadPleaText.selector));
+        assertLetterReverts(alice, "APPEAL\n", abi.encodeWithSelector(CabalGate.BadPleaText.selector));
+        assertEq(gate.lastPleaOf(alice), id);
+    }
+
     function test_siteAutoSellPleadsAnyValidAmount() public {
         uint256 amount = plea.balanceOf(alice) / 20;
         vm.prank(alice);
@@ -384,10 +459,19 @@ contract LetterboxTest is Fixture {
         vm.prank(alice);
         uint256 a = letterbox.appealAuto(id, "Five percent, still a gift, still keeping the rest.");
         assertEq(gate.getPlea(a).flags, 2);
+        // Below the 0.70 IMD minimum value the Letterbox refuses before the gate's 1% minimum.
         uint256 amt101 = plea.balanceOf(bob) / 200;
         vm.prank(bob);
-        vm.expectRevert(CabalGate.AmountTooSmall.selector);
+        vm.expectPartialRevert(Letterbox.TooSmallForTheFee.selector);
         letterbox.plead(amt101, "too small");
+        address whale = makeAddr("whale");
+        fund(whale);
+        imd.mint(whale, 2_000e18);
+        buy(whale, 2_000e18);
+        uint256 halfPercent = plea.balanceOf(whale) / 200;
+        vm.prank(whale);
+        vm.expectRevert(CabalGate.AmountTooSmall.selector);
+        letterbox.plead(halfPercent, "half a percent is too small for the gate");
     }
 
     // ---------------------------------------------------------------- status and leaderboard
@@ -626,7 +710,7 @@ contract LetterboxMainnetPathTest is Fixture {
         uint256 id = gate.lastPleaOf(alice);
         assertEq(imd.balanceOf(intake.PAY_TO()) - intakeBefore, 0.5e18, "the Intake was paid in IMD");
         assertEq(imd.balanceOf(address(letterbox)), 0.25e18, "only the tip stays");
-        uint256 feePlea = bal - bal / 10 - plea.balanceOf(alice);
+        uint256 feePlea = bal - bal / 5 - plea.balanceOf(alice);
         assertLe(feePlea, maxFeePlea);
         (feeImd,) = letterbox.feesFor(true);
         assertEq(feeImd, 0.5e18 + 0.35e18 + 0.25e18, "an appeal also buys the wall share");

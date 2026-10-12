@@ -149,10 +149,16 @@ contract GateTest is Fixture {
     }
 
     function test_cannotPassIsRefusedBeforePaying() public {
-        uint256 amount = plea.balanceOf(alice) * 28 / 100; // share 5, hold 0, P/L, 24h 5
-        uint256 need = 70 - gate.factScore(alice, amount);
+        // A fresh small buyer selling 40% (within the 2.5M cap): share 5 (over 35%), hold 0, P/L 14,
+        // 24h 5 -> need 46.
+        address fresh = makeAddr("fresh");
+        fund(fresh);
+        buy(fresh, 1e18);
+        uint256 amount = plea.balanceOf(fresh) * 40 / 100;
+        assertLt(amount, gate.MAX_SELL());
+        uint256 need = 70 - gate.factScore(fresh, amount);
         assertGt(need, 45);
-        vm.prank(alice);
+        vm.prank(fresh);
         vm.expectRevert(abi.encodeWithSelector(CabalGate.CannotPass.selector, need));
         gate.submitSell(amount, "x");
     }
@@ -389,13 +395,13 @@ contract GateTest is Fixture {
         buy(bob, 1e18); // fresh hourly price checkpoint
         (, uint256 tracked,) = hook.basisOf(alice);
         uint256 bal = plea.balanceOf(alice);
-        uint256 part = bal / 5; // 20% of the balance, all of it bought
+        uint256 part = bal * 3 / 10; // 30% of the balance, all of it bought
         assertLe(part, tracked);
         uint8 before = gate.factScore(alice, part);
         deal(address(plea), alice, bal * 3); // prize PLEA on top (no buy record)
         uint8 withPrize = gate.factScore(alice, part);
         assertGe(withPrize, before, "a prize never lowers the score for bought tokens");
-        assertEq(withPrize - before, 7, "share of balance 20% -> under 15%: 11 -> 18 points");
+        assertEq(withPrize - before, 7, "share of balance 30% -> under 20%: 11 -> 18 points");
         uint8 beyond = gate.factScore(alice, tracked + 1);
         assertLt(beyond, withPrize, "selling more than was bought drops hold-time and P&L points");
     }

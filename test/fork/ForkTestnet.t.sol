@@ -503,8 +503,8 @@ contract ForkTestnetTest is Test {
         address a = w[0];
         buy(a, 200e18);
         uint256 bal = plea.balanceOf(a);
-        _swap(a, false, bal / 10, abi.encode(a), true); // router sell: SellsOnlyViaGate
-        _swap(a, false, bal / 10, "", true); // without a recipient too
+        _swap(a, false, bal / 5, abi.encode(a), true); // router sell: SellsOnlyViaGate
+        _swap(a, false, bal / 5, "", true); // without a recipient too
         vm.startPrank(a);
         vm.expectRevert(PLEA.CabalIsWatching.selector);
         plea.transfer(w[1], 1); // no wallet-to-wallet transfers
@@ -684,7 +684,7 @@ contract ForkTestnetTest is Test {
             _letter(a, "I bought at the launch and held a day; one tenth pays for my bike repair, the rest stays.");
         emit log_named_uint("letter gas", gasLetter);
         CabalGate.Plea memory p = gate.getPlea(id);
-        assertEq(p.amount, bal / 10);
+        assertEq(p.amount, bal / 5 > 2_500_000e18 ? 2_500_000e18 : bal / 5, "20%, within the 2.5M cap");
         assertEq(p.flags, 3);
         (address payer,,, bool done) = intake.requests(p.intakeId);
         assertEq(payer, address(gate));
@@ -699,7 +699,7 @@ contract ForkTestnetTest is Test {
         uint256 out = letterbox.deliver(id);
         emit log_named_uint("deliver gas", g - gasleft());
         assertEq(IMD.balanceOf(a) - imdBefore, out);
-        assertGe(out * 10_000, _spotValue(bal / 10) * 9_500, "at least 95% of spot");
+        assertGe((out + 0.35e18) * 10_000, _spotValue(p.amount) * 9_500, "at least 95% of spot before the fee");
         assertEq(IMD.balanceOf(runner), 0.25e18);
         assertTrue(seasons.recorded(id));
         assertEq(plea.balanceOf(address(letterbox)), 0);
@@ -720,7 +720,7 @@ contract ForkTestnetTest is Test {
         uint256 id = gate.lastPleaOf(a);
         CabalGate.Plea memory p = gate.getPlea(id);
         assertEq(p.seller, a);
-        assertEq(p.amount, bal / 10);
+        assertEq(p.amount, bal / 5 > 2_500_000e18 ? 2_500_000e18 : bal / 5, "20%, within the 2.5M cap");
         assertEq(p.flags, 3);
         (address payer,,, bool done) = intake.requests(p.intakeId);
         assertEq(payer, address(gate));
@@ -730,7 +730,7 @@ contract ForkTestnetTest is Test {
         vm.prank(a);
         letterbox.letter("SELL");
         assertEq(uint8(_status(id)), uint8(CabalGate.Status.Executed));
-        assertGe((IMD.balanceOf(a) - imdBefore - 0.25e18) * 10_000, _spotValue(bal / 10) * 9_500, "sale + own tip");
+        assertGe((IMD.balanceOf(a) - imdBefore - 0.25e18 + 0.35e18) * 10_000, _spotValue(p.amount) * 9_500, "sale + own tip");
         assertTrue(seasons.recorded(id));
         assertEq(IMD.balanceOf(address(letterbox)), 0);
     }

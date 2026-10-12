@@ -86,7 +86,7 @@ contract LetterboxHandler is Test {
     // ---------------------------------------------------------------- writing
 
     /// A new plea by letter (`how` 0: raw input data, 1: `letter(text)`) or by the site's auto-sell
-    /// (`how` 2: `plead(amount, text)` with 1%-35% of the balance).
+    /// (`how` 2: `plead(amount, text)` with 1%-50% of the balance).
     function write(uint256 writerSeed, uint256 how, uint256 bps) external {
         _send(_writer(writerSeed), how % 3, bps, false);
     }
@@ -107,7 +107,7 @@ contract LetterboxHandler is Test {
         uint256 balBefore = plea.balanceOf(w);
         bool ok;
         if (!isAppeal && how == 2) {
-            uint256 siteAmount = balBefore * bound(bps, 100, 3_500) / 10_000;
+            uint256 siteAmount = balBefore * bound(bps, 100, 5_000) / 10_000;
             if (siteAmount > gate.MAX_SELL()) siteAmount = gate.MAX_SELL();
             vm.prank(w);
             try letterbox.plead(siteAmount, TEXT) returns (uint256) {
@@ -217,12 +217,14 @@ contract LetterboxHandler is Test {
         uint256 writerPlea = plea.balanceOf(w);
         uint256 writerImd = imd.balanceOf(w);
         uint256 tips = imd.balanceOf(runner);
+        uint256 pot = imd.balanceOf(plea.seasons());
         vm.prank(runner);
         try letterbox.deliver(id) returns (uint256 out) {
             ++deliveries;
             _checkSold(id);
             _check(imd.balanceOf(runner) - tips == TIP, "the runner earns exactly the tip");
             _check(imd.balanceOf(w) - writerImd == out, "the sale's IMD goes to the writer");
+            _check(imd.balanceOf(plea.seasons()) - pot >= 0.35e18, "the auto-sell fee reached the season pot");
             _check(plea.balanceOf(w) == writerPlea && amount > 0, "a delivery moves no PLEA of the writer's");
         } catch {}
     }
