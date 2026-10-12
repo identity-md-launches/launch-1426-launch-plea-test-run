@@ -9,7 +9,6 @@ import {FullMath} from "v4-core/libraries/FullMath.sol";
 import {PLEA} from "../../src/PLEA.sol";
 import {CabalGate} from "../../src/CabalGate.sol";
 import {Seasons} from "../../src/Seasons.sol";
-import {Laureates} from "../../src/Laureates.sol";
 import {PleaDistributor} from "../../src/PleaDistributor.sol";
 import {Letterbox} from "../../src/Letterbox.sol";
 import {PleaLaunch} from "../../src/PleaLaunch.sol";
@@ -80,7 +79,6 @@ contract ForkMainnetTest is Test {
     PLEA plea;
     CabalGate gate;
     Seasons seasons;
-    Laureates laureates;
     Letterbox letterbox;
     PleaLaunch launch;
     PleaHook hook;
@@ -128,24 +126,23 @@ contract ForkMainnetTest is Test {
             address(plea), address(INTAKE), address(IMD), address(IMD), vm.addr(SIGNER_KEY), SEASON, DEADMAN
         );
         seasons = new Seasons(address(plea), address(gate), address(IMD));
-        laureates = new Laureates(address(plea));
         PleaDistributor distributor = new PleaDistributor(address(plea), owner);
-        letterbox = new Letterbox(
-            address(plea), address(gate), address(seasons), address(laureates), address(IMD), address(IMD), false
-        );
         launch = new PleaLaunch(
             address(plea),
             address(gate),
             address(seasons),
-            address(laureates),
             address(distributor),
-            address(letterbox),
             POOL_MANAGER,
             address(IMD),
             address(stacker),
             CREDIT_GAS,
-            block.timestamp + 7 days
+            block.timestamp + 7 days,
+            address(IMD),
+            false,
+            keccak256(type(Letterbox).creationCode)
         );
+        // After the launch transaction: anyone deploys the committed Letterbox.
+        letterbox = Letterbox(launch.deployLetterbox(type(Letterbox).creationCode));
     }
 
     function _deployHook() internal {

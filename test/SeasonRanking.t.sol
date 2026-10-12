@@ -4,7 +4,6 @@ pragma solidity 0.8.26;
 import {Test} from "forge-std/Test.sol";
 import {PLEA} from "../src/PLEA.sol";
 import {Seasons} from "../src/Seasons.sol";
-import {Laureates} from "../src/Laureates.sol";
 import {PleaDistributor} from "../src/PleaDistributor.sol";
 import {MockIMD} from "./utils/Mocks.sol";
 
@@ -38,7 +37,6 @@ contract RankingResults {
 contract SeasonRankingTest is Test {
     RankingResults gate;
     Seasons seasons;
-    Laureates laureates;
     MockIMD imd;
     address alice = makeAddr("ranking alice");
     address bob = makeAddr("ranking bob");
@@ -49,22 +47,8 @@ contract SeasonRankingTest is Test {
         PLEA plea = new PLEA(address(this));
         imd = new MockIMD();
         seasons = new Seasons(address(plea), address(gate), address(imd));
-        laureates = new Laureates(address(plea));
         PleaDistributor distributor = new PleaDistributor(address(plea), address(this));
-        plea.setLauncher(address(gate), address(seasons), address(laureates), address(distributor));
-    }
-
-    function test_earlierTiedPleaTakesFirstAndFifthLaureateSlots() public {
-        for (uint256 id = 1; id <= 6; ++id) {
-            gate.approve(id, alice, 45);
-        }
-        for (uint256 id = 6; id > 0; --id) {
-            seasons.record(id);
-        }
-        Seasons.PleaEntry[5] memory top = seasons.topPleasOf(0);
-        for (uint256 i; i < 5; ++i) {
-            assertEq(top[i].pleaId, i + 1, "older tied plea lost its rank");
-        }
+        plea.setLauncher(address(gate), address(seasons), address(distributor));
     }
 
     function test_walletTieUsesNewestCountedPleaNotLastRecordedPlea() public {
@@ -109,7 +93,7 @@ contract SeasonRankingTest is Test {
         assertEq(seasons.topOf(0)[0].pleaId, 3, "maximum over discarded pleas is not the tie key");
     }
 
-    function test_closeSeasonUsesTheSameTiesForPrizesAndNfts() public {
+    function test_closeSeasonUsesTheSameTiesForPrizes() public {
         gate.approve(1, alice, 45);
         gate.approve(2, bob, 45);
         gate.approve(3, bob, 45);
@@ -123,16 +107,10 @@ contract SeasonRankingTest is Test {
         assertEq(imd.balanceOf(bob), 250e18, "wrong wallet received first prize");
         assertEq(imd.balanceOf(alice), 180e18);
         assertEq(seasons.pot(), 570e18);
-        for (uint256 i = 1; i <= 4; ++i) {
-            (uint64 pleaId,, uint8 rank) = laureates.laureate(i);
-            assertEq(pleaId, i);
-            assertEq(rank, i);
-            assertEq(laureates.ownerOf(i), i == 1 || i == 4 ? alice : bob);
-        }
     }
 
     /// @dev Independent batch model: sort all 60 results, take each wallet's first three, then
-    /// compare with the contract's online top-ten/top-five after a random recording permutation.
+    /// compare with the contract's online top ten after a random recording permutation.
     function testFuzz_rankingsMatchSortedResultsInAnyRecordOrder(uint256 seed) public {
         uint256 count = 60;
         uint8[] memory scores = new uint8[](count);
@@ -185,11 +163,6 @@ contract SeasonRankingTest is Test {
             assertEq(top[i].wallet, expected[i].wallet, "wallet order");
             assertEq(top[i].points, expected[i].points, "points");
             assertEq(top[i].pleaId, expected[i].pleaId, "wallet tie key");
-        }
-        Seasons.PleaEntry[5] memory topPleas = seasons.topPleasOf(0);
-        for (uint256 i; i < 5; ++i) {
-            assertEq(topPleas[i].pleaId, sorted[i] + 1, "Laureate order");
-            assertEq(topPleas[i].score, scores[sorted[i]], "Laureate score");
         }
     }
 }

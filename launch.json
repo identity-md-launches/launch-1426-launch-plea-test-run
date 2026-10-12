@@ -28,28 +28,10 @@
       ]
     },
     {
-      "contract": "Laureates",
-      "constructorArgs": [
-        "$contract:PLEA"
-      ]
-    },
-    {
       "contract": "PleaDistributor",
       "constructorArgs": [
         "$contract:PLEA",
         "$owner"
-      ]
-    },
-    {
-      "contract": "Letterbox",
-      "constructorArgs": [
-        "$contract:PLEA",
-        "$contract:CabalGate",
-        "$contract:Seasons",
-        "$contract:Laureates",
-        "0x2B69099E59b05901faA1DD164fabf098bf831E82",
-        "0x44a1Cd38474FB1748400E7DEb5F8D786ccE3F89A",
-        "true"
       ]
     },
     {
@@ -58,16 +40,17 @@
         "$contract:PLEA",
         "$contract:CabalGate",
         "$contract:Seasons",
-        "$contract:Laureates",
         "$contract:PleaDistributor",
-        "$contract:Letterbox",
         "0xE03A1074c86CFeDd5C142C4F04F1a1536e203543",
         "0x2B69099E59b05901faA1DD164fabf098bf831E82",
         "0x0457276D7b036818B3EddC1A4A3FCeda61e9314d",
         "1300000",
-        "1792162800"
+        "1792162800",
+        "0x44a1Cd38474FB1748400E7DEb5F8D786ccE3F89A",
+        "true",
+        "0xcdee42a55546db86c399363e90691f0bfed854c4a05a216fc3390df1824c9c04"
       ]
     }
   ],
-  "notes": "PLEA test run 3 on Sepolia (chain 11155111): the accepted launch #1311 code plus letters and auto-sell (Letterbox), a 1% minimum plea, the owner excluded from seasons and keeper tips, a six-season PLEA bonus and the Cabal's judging rules v2. The factory deploys PLEA, CabalGate, Seasons, Laureates, PleaDistributor, Letterbox and PleaLaunch in this order, with zero ETH, in one transaction. Atomic deployment is required: PLEA.setLauncher accepts either the deploy-transaction flag or PLEA's deployment block, and PleaLaunch's constructor registers the system contracts and then the Letterbox (PLEA.setLetterbox, launcher only, once) in the same transaction. Constructor arguments, in declaration order: PLEA(owner = $owner). CabalGate(PLEA, Intake v2 0xa43e6f75ee006411f79ac1c84120606c2330de82, oracle fee asset 0x44a1cd38474fb1748400e7deb5f8d786cce3f89a, TestIMD 0x2B69099E59b05901faA1DD164fabf098bf831E82, oracle signer 0x5598Aa9146215Bc13eb26f2c692Ad1461Fd32982, season 18000 s, dead-man 118800 s). Seasons(PLEA, CabalGate, TestIMD). Laureates(PLEA). PleaDistributor(PLEA, owner = $owner). Letterbox(PLEA, CabalGate, Seasons, Laureates, TestIMD, oracle fee asset, mintOracleFee = true: on Sepolia the oracle fee token is a separate open-mint test token, so the Letterbox mints the 0.5 fee; refused on chain id 1). PleaLaunch(PLEA, CabalGate, Seasons, Laureates, PleaDistributor, Letterbox, Sepolia Uniswap v4 PoolManager 0xE03A1074c86CFeDd5C142C4F04F1a1536e203543, TestIMD, imd/acc launch #1294 Stacker 0x0457276d7b036818b3eddc1a4a3fceda61e9314d, credit gas 1300000, START 1792162800). Only the two owner arguments use $owner; nothing is owned by msg.sender or tx.origin, and no constructor calls a live external contract. PLEA.init mints 87% to the hook, 3% to Seasons and 10% to PleaDistributor; each of the first six seasons pays 5,000,000 PLEA to its qualifying top 10 and burns the unpaid rest; flushToWall burns what is left; nobody can withdraw it. PleaHook is not a manifest entry: after launch, PleaLaunch.deployHook(salt, initCode) deploys it with CREATE2 using a salt mined off chain, then PLEA.init mints the supply; seed() opens trading (owner any time, anyone from START). PLEA supply is zero after this deployment. Gas: test/LaunchManifest.t.sol deploys exactly this manifest from an empty Sepolia chain and reports about 24.3M gas, over the 16,777,216 mainnet cap; the test reports that margin and does not assert it, since Sepolia accepted launch #1242's 81.8M-gas deploy in one transaction. The deployment service's simulation of the real factory transaction is the authoritative gas check."
+  "notes": "PLEA test run 3 on Sepolia (chain 11155111): the accepted launch #1311 code plus letters and auto-sell (Letterbox), a 1% minimum plea, the owner excluded from seasons and keeper tips, a six-season PLEA bonus and the Cabal's judging rules v2; Laureates (season NFTs) removed, display names kept in the Letterbox. The factory deploys PLEA, CabalGate, Seasons, PleaDistributor and PleaLaunch in this order, with zero ETH, in one transaction (11.6M gas measured as the chain charges it, 14.1M with a 22% gas-limit headroom, under Ethereum's 16,777,216 per-transaction cap; test/LaunchManifest.t.sol asserts it). Atomic deployment is required: PLEA.setLauncher accepts either the deploy-transaction flag or PLEA's deployment block, and PleaLaunch's constructor registers the system contracts. Constructor arguments, in declaration order: PLEA(owner = $owner). CabalGate(PLEA, Intake v2 0xa43e6f75ee006411f79ac1c84120606c2330de82, oracle fee asset 0x44a1cd38474fb1748400e7deb5f8d786cce3f89a, TestIMD 0x2B69099E59b05901faA1DD164fabf098bf831E82, oracle signer 0x5598Aa9146215Bc13eb26f2c692Ad1461Fd32982, season 18000 s, dead-man 118800 s). Seasons(PLEA, CabalGate, TestIMD). PleaDistributor(PLEA, owner = $owner). PleaLaunch(PLEA, CabalGate, Seasons, PleaDistributor, Sepolia Uniswap v4 PoolManager 0xE03A1074c86CFeDd5C142C4F04F1a1536e203543, TestIMD, imd/acc launch #1294 Stacker 0x0457276d7b036818b3eddc1a4a3fceda61e9314d, credit gas 1300000, START 1792162800, the Letterbox's oracle fee asset 0x44a1cd38474fb1748400e7deb5f8d786cce3f89a, mintOracleFee = true (on Sepolia the oracle fee token is a separate open-mint test token, so the Letterbox mints the 0.5 fee; refused on chain id 1), and the keccak256 of the Letterbox's creation code, which takes no constructor arguments). Only the two owner arguments use $owner; nothing is owned by msg.sender or tx.origin, and no constructor calls a live external contract. After the launch, anyone calls PleaLaunch.deployLetterbox(creationCode) once: it checks the code against the committed hash, deploys the Letterbox with CREATE2 (it reads its settings from PleaLaunch) and registers it with PLEA (PLEA.setLetterbox, launcher only, once); about 4.8M gas, its own transaction. PleaHook is not a manifest entry either: PleaLaunch.deployHook(salt, initCode) deploys it with CREATE2 using a salt mined off chain, then PLEA.init mints 87% to the hook, 3% to Seasons and 10% to PleaDistributor; each of the first six seasons pays 5,000,000 PLEA to its qualifying top 10 and burns the unpaid rest; flushToWall burns what is left; nobody can withdraw it. seed() opens trading (owner any time, anyone from START). PLEA supply is zero after the launch transaction."
 }

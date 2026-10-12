@@ -9,18 +9,21 @@ import {IGate, IPleaHook} from "./interfaces/IPleaParts.sol";
 
 interface IPLEAForLaunch {
     function owner() external view returns (address);
-    function setLauncher(address gate, address seasons, address laureates, address distributor) external;
+    function setLauncher(address gate, address seasons, address distributor) external;
     function setLetterbox(address letterbox) external;
     function init(address hook, address poolManager) external;
 }
 
-/// @title PleaLaunch — wires PLEA at launch and deploys the hook afterwards
+/// @title PleaLaunch — wires PLEA at launch and deploys the hook and the Letterbox afterwards
 /// @dev Last contract of the launch. Its constructor (inside the launch transaction) registers the
-/// system's contracts with PLEA and commits to the hook's exact init code. After launch, anyone
-/// calls `deployHook` with a salt mined off chain (script/MineSalt.s.sol): the hook lands on an
-/// address carrying its flag bits, and PLEA mints 87% to it, 3% to Seasons and 10% to the distributor. The result
-/// is fully determined by the committed init code, so front-running `deployHook` changes nothing.
-/// `seed` opens trading: the owner may call it any time, anyone once `START` has passed.
+/// system's contracts with PLEA and commits to the hook's and the Letterbox's exact init code, so
+/// the launch transaction stays under Ethereum's 16,777,216-gas cap. After launch, anyone calls
+/// `deployHook` with a salt mined off chain (script/MineSalt.s.sol): the hook lands on an address
+/// carrying its flag bits, and PLEA mints 87% to it, 3% to Seasons and 10% to the distributor. Anyone
+/// calls `deployLetterbox` once with the Letterbox's creation code: it reads its settings from this
+/// contract and PLEA registers it. Both results are fully determined by the committed code, so
+/// front-running either call changes nothing. `seed` opens trading: the owner may call it any
+/// time, anyone once `START` has passed.
 contract PleaLaunch {
     error WrongInitCode();
     error HookDeployFailed();
@@ -28,8 +31,11 @@ contract PleaLaunch {
     error HookAlreadyDeployed();
     error HookNotDeployed();
     error TooEarly(uint256 start);
+    error LetterboxAlreadyDeployed();
+    error LetterboxDeployFailed();
 
     event HookDeployed(address indexed hook, bytes32 salt);
+    event LetterboxDeployed(address indexed letterbox);
     event TradingOpened(uint256 at);
 
     uint160 public constant FLAG_MASK = (1 << 14) - 1;
@@ -38,32 +44,47 @@ contract PleaLaunch {
 
     address public immutable plea;
     address public immutable gate;
+    address public immutable seasons;
     address public immutable poolManager;
+    address public immutable imd;
     address public immutable owner;
     /// @notice Latest time trading opens: from then on anyone may call `seed`.
     uint256 public immutable START;
     bytes32 public immutable hookInitCodeHash;
+    /// @notice The Letterbox's settings, read by its constructor: the asset the oracle fee is paid
+    /// in, and whether it mints that fee (Sepolia's open-mint test token; refused on chain id 1).
+    address public immutable oracleAsset;
+    bool public immutable mintOracleFee;
+    /// @notice keccak256 of the Letterbox's creation code (it takes no constructor arguments).
+    bytes32 public immutable letterboxCodeHash;
 
     address public hook;
+    address public letterbox;
     bool public opened;
 
     constructor(
         address plea_,
         address gate_,
         address seasons_,
-        address laureates_,
         address distributor_,
-        address letterbox_,
         address poolManager_,
         address imd_,
         address stacker_,
         uint256 creditGas_,
-        uint256 start_
+        uint256 start_,
+        address oracleAsset_,
+        bool mintOracleFee_,
+        bytes32 letterboxCodeHash_
     ) {
         plea = plea_;
         gate = gate_;
+        seasons = seasons_;
         poolManager = poolManager_;
+        imd = imd_;
         START = start_;
+        oracleAsset = oracleAsset_;
+        mintOracleFee = mintOracleFee_;
+        letterboxCodeHash = letterboxCodeHash_;
         address owner_ = IPLEAForLaunch(plea_).owner();
         owner = owner_;
         hookInitCodeHash = keccak256(
@@ -72,8 +93,7 @@ contract PleaLaunch {
                 abi.encode(poolManager_, plea_, imd_, stacker_, owner_, seasons_, creditGas_)
             )
         );
-        IPLEAForLaunch(plea_).setLauncher(gate_, seasons_, laureates_, distributor_);
-        IPLEAForLaunch(plea_).setLetterbox(letterbox_);
+        IPLEAForLaunch(plea_).setLauncher(gate_, seasons_, distributor_);
     }
 
     /// @notice Deploys PleaHook with CREATE2 at a flagged address and lets PLEA mint the supply.
@@ -90,6 +110,28 @@ contract PleaLaunch {
         hook = deployed;
         IPLEAForLaunch(plea).init(deployed, poolManager);
         emit HookDeployed(deployed, salt);
+    }
+
+    /// @notice Deploys the Letterbox with CREATE2 (salt 0) and registers it with PLEA, once.
+    /// `creationCode` must be the committed one; the Letterbox reads its settings from this contract.
+    function deployLetterbox(bytes calldata creationCode) external returns (address deployed) {
+        if (letterbox != address(0)) revert LetterboxAlreadyDeployed();
+        if (keccak256(creationCode) != letterboxCodeHash) revert WrongInitCode();
+        bytes memory code = creationCode;
+        assembly ("memory-safe") {
+            deployed := create2(0, add(code, 32), mload(code), 0)
+        }
+        if (deployed == address(0)) revert LetterboxDeployFailed();
+        letterbox = deployed;
+        IPLEAForLaunch(plea).setLetterbox(deployed);
+        emit LetterboxDeployed(deployed);
+    }
+
+    /// @notice The address `deployLetterbox` deploys to.
+    function predictLetterbox() external view returns (address) {
+        return address(
+            uint160(uint256(keccak256(abi.encodePacked(bytes1(0xff), address(this), bytes32(0), letterboxCodeHash))))
+        );
     }
 
     /// @notice The address `deployHook(salt, …)` deploys to.

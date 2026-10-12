@@ -6,14 +6,13 @@ import {PoolManager} from "v4-core/PoolManager.sol";
 import {PLEA} from "../src/PLEA.sol";
 import {CabalGate} from "../src/CabalGate.sol";
 import {Seasons} from "../src/Seasons.sol";
-import {Laureates} from "../src/Laureates.sol";
 import {PleaDistributor} from "../src/PleaDistributor.sol";
 import {Letterbox} from "../src/Letterbox.sol";
 import {PleaLaunch} from "../src/PleaLaunch.sol";
 import {PleaHook} from "../src/PleaHook.sol";
 import {MockIMD, MockIntake} from "./utils/Mocks.sol";
 
-/// @dev The launch as IMD runs it: six constructors, then deployHook and seed after launch.
+/// @dev The launch as IMD runs it: five constructors, then deployLetterbox, deployHook and seed.
 contract LaunchTest is Test {
     address constant OWNER = 0x4b91078b2374c956A65F7Af0999CaE0a935E6821;
     address constant SIGNER = 0x5598Aa9146215Bc13eb26f2c692Ad1461Fd32982;
@@ -39,23 +38,20 @@ contract LaunchTest is Test {
         plea = new PLEA(OWNER);
         gate = new CabalGate(address(plea), address(intake), address(imd), address(imd), SIGNER, 5 hours, 27.5 minutes);
         seasons = new Seasons(address(plea), address(gate), address(imd));
-        Laureates l = new Laureates(address(plea));
         PleaDistributor d = new PleaDistributor(address(plea), OWNER);
-        Letterbox lb = new Letterbox(
-            address(plea), address(gate), address(seasons), address(l), address(imd), address(imd), false
-        );
         launch = new PleaLaunch(
             address(plea),
             address(gate),
             address(seasons),
-            address(l),
             address(d),
-            address(lb),
             poolManager,
             address(imd),
             stacker,
             1_300_000,
-            START
+            START,
+            address(imd),
+            false,
+            keccak256(type(Letterbox).creationCode)
         );
     }
 
@@ -80,6 +76,8 @@ contract LaunchTest is Test {
         assertEq(plea.seasons(), address(seasons));
         assertTrue(plea.restricted());
         assertEq(gate.startedAt(), 0);
+        assertEq(plea.letterbox(), address(0), "the Letterbox comes after the launch");
+        assertEq(launch.letterboxCodeHash(), keccak256(type(Letterbox).creationCode));
     }
 
     function test_deployHookChecksTheInitCodeAndFlags() public {
@@ -131,6 +129,10 @@ contract LaunchTest is Test {
         uint256 g = gasleft();
         deployAll(address(pm));
         uint256 deployGas = g - gasleft();
+        bytes memory lbCode = type(Letterbox).creationCode;
+        g = gasleft();
+        launch.deployLetterbox(lbCode);
+        uint256 letterboxGas = g - gasleft();
         bytes memory code = initCode();
         bytes32 salt = mine();
         g = gasleft();
@@ -140,11 +142,15 @@ contract LaunchTest is Test {
         g = gasleft();
         launch.seed();
         uint256 seedGas = g - gasleft();
-        emit log_named_uint("launch (6 contracts + intake mock)", deployGas);
+        emit log_named_uint("launch (5 contracts + intake mock)", deployGas);
+        emit log_named_uint("deployLetterbox", letterboxGas);
         emit log_named_uint("deployHook", hookGas);
         emit log_named_uint("seed", seedGas);
         assertLt(deployGas, 16_777_216);
+        assertLt(letterboxGas, 16_777_216);
         assertLt(hookGas, 16_777_216);
         assertLt(seedGas, 16_777_216);
+        assertTrue(PleaHook(plea.hook()).seeded());
+        assertEq(Letterbox(payable(plea.letterbox())).nameOf(OWNER), "");
     }
 }

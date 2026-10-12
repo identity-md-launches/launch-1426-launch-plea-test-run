@@ -18,7 +18,7 @@ contract PLEA is ERC20, Ownable {
     error ZeroAddress();
     error NotLetterbox();
 
-    event Launched(address indexed launcher, address gate, address seasons, address laureates, address distributor);
+    event Launched(address indexed launcher, address gate, address seasons, address distributor);
     event Initialized(address indexed hook);
     event Allowed(address indexed account);
     event LetterboxSet(address indexed letterbox);
@@ -34,7 +34,6 @@ contract PLEA is ERC20, Ownable {
     address public launcher;
     address public gate;
     address public seasons;
-    address public laureates;
     address public distributor;
     address public hook;
     address public poolManager;
@@ -54,29 +53,27 @@ contract PLEA is ERC20, Ownable {
 
     /// @notice Records the launcher and system contracts once, from PleaLaunch's constructor.
     /// @dev Registration also accepts any first caller in PLEA's deployment block for rehearsals.
-    /// The factory must deploy all six contracts atomically to prevent an intervening registration.
-    function setLauncher(address gate_, address seasons_, address laureates_, address distributor_) external {
+    /// The factory must deploy all five contracts atomically to prevent an intervening registration.
+    function setLauncher(address gate_, address seasons_, address distributor_) external {
         uint256 flag;
         assembly ("memory-safe") {
             flag := tload(DEPLOY_TX_SLOT)
         }
         if (flag != 1 && block.number != deployBlock) revert NotDeployTx();
         if (launcher != address(0)) revert AlreadySet();
-        if (gate_ == address(0) || seasons_ == address(0) || laureates_ == address(0) || distributor_ == address(0)) {
-            revert ZeroAddress();
-        }
+        if (gate_ == address(0) || seasons_ == address(0) || distributor_ == address(0)) revert ZeroAddress();
         assembly ("memory-safe") {
             tstore(DEPLOY_TX_SLOT, 0)
         }
         launcher = msg.sender;
         gate = gate_;
         seasons = seasons_;
-        laureates = laureates_;
         distributor = distributor_;
-        emit Launched(msg.sender, gate_, seasons_, laureates_, distributor_);
+        emit Launched(msg.sender, gate_, seasons_, distributor_);
     }
 
-    /// @notice Records the Letterbox once, from PleaLaunch's constructor (right after `setLauncher`).
+    /// @notice Records the Letterbox once, from `PleaLaunch.deployLetterbox` after the launch (the
+    /// Letterbox's exact code is committed at launch, like the hook's).
     function setLetterbox(address letterbox_) external {
         if (msg.sender != launcher) revert NotLauncher();
         if (letterbox != address(0)) revert AlreadySet();

@@ -107,9 +107,6 @@ contract SeasonsTest is Fixture {
         assertEq(t[1].points, 80);
         assertEq(t[2].wallet, bob);
         assertEq(t[2].points, 45);
-        Seasons.PleaEntry[5] memory tp = seasons.topPleasOf(0);
-        assertEq(tp[0].score, 45);
-        assertEq(tp[1].score, 43);
         vm.expectRevert();
         seasons.record(1);
     }
@@ -143,14 +140,14 @@ contract SeasonsTest is Fixture {
 
     // ---------------------------------------------------------------- closing
 
-    function test_closeSeasonPaysTheTopTenAndMintsLaureates() public {
+    function test_closeSeasonPaysTheTopTen() public {
         // alice 3 x 42 = 126 points; carol 2 x 40 = 80; bob 45 (below 60: no prize).
         for (uint256 i; i < 3; ++i) {
             scored(alice, 42);
         }
         scored(carol, 40);
         scored(carol, 40);
-        uint256 bobId = scored(bob, 45);
+        scored(bob, 45);
         assertGt(hook.totalPrize(), 0); // the hook's prize fee feeds the pot
         imd.mint(address(seasons), 1_000e18);
         seasons.checkpoint(); // attribute this direct donation before the season ends
@@ -175,16 +172,6 @@ contract SeasonsTest is Fixture {
         assertEq(imd.balanceOf(address(seasons)), pot - pot * 2500 / 10_000 - pot * 1800 / 10_000);
         assertTrue(seasons.closed(0));
         assertEq(seasons.nextToClose(), 1);
-
-        assertEq(laureates.totalSupply(), 5);
-        (uint64 first,,) = laureates.laureate(1);
-        assertEq(first, bobId);
-        assertEq(laureates.ownerOf(1), bob);
-        assertEq(laureates.ownerOf(2), alice);
-        assertTrue(vm.contains(laureates.tokenURI(1), "data:application/json;base64,"));
-        vm.prank(bob);
-        laureates.transferFrom(bob, carol, 1); // tradable
-        assertEq(laureates.ownerOf(1), carol);
 
         vm.expectRevert(abi.encodeWithSelector(Seasons.AlreadyRecorded.selector, 1));
         seasons.record(1);

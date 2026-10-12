@@ -13,7 +13,7 @@ bytecode_hash = "none"
 cbor_metadata = false
 ffi = false
 gas_limit = "1000000000"
-fs_permissions = [{ access = "read", path = "./out" }]
+fs_permissions = [{ access = "read", path = "./out" }, { access = "read", path = "./launch.json" }]
 
 [profile.default.fuzz]
 runs = 32

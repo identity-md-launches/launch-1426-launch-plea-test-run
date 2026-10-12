@@ -59,7 +59,7 @@ contract TokenTest is Fixture {
 
     function test_launcherAndInitAreOneShot() public {
         vm.expectRevert(PLEA.AlreadySet.selector);
-        plea.setLauncher(alice, alice, alice, alice);
+        plea.setLauncher(alice, alice, alice);
         vm.expectRevert(PLEA.NotLauncher.selector);
         plea.init(alice, alice);
         vm.prank(address(launch));

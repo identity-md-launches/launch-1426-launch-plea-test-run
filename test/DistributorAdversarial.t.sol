@@ -7,7 +7,6 @@ import {IERC20Errors} from "@openzeppelin/contracts/interfaces/draft-IERC6093.so
 import {PLEA} from "src/PLEA.sol";
 import {CabalGate} from "src/CabalGate.sol";
 import {Seasons} from "src/Seasons.sol";
-import {Laureates} from "src/Laureates.sol";
 import {PleaDistributor} from "src/PleaDistributor.sol";
 import {MockIMD, MockIntake} from "./utils/Mocks.sol";
 import {ClaimTree} from "./utils/ClaimTree.sol";
@@ -38,9 +37,8 @@ abstract contract DistributionFixture is Test {
             address(token), address(intake), address(quote), address(quote), makeAddr("signer"), 18000, 118800
         );
         seasons = new Seasons(address(token), address(cabal), address(quote));
-        Laureates laureates = new Laureates(address(token));
         drop = new PleaDistributor(address(token), address(this));
-        token.setLauncher(address(cabal), address(seasons), address(laureates), address(drop));
+        token.setLauncher(address(cabal), address(seasons), address(drop));
         token.init(treasury, manager);
         cabal.begin();
         root = ClaimTree.tree(actors)[0];

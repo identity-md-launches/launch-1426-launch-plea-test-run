@@ -38,7 +38,6 @@ interface IPLEA {
     function hook() external view returns (address);
     function gate() external view returns (address);
     function seasons() external view returns (address);
-    function laureates() external view returns (address);
     function poolManager() external view returns (address);
     function letterbox() external view returns (address);
     function courtTake(address from, uint256 amount) external;
@@ -68,11 +67,6 @@ interface IPleaHook {
     function basisOf(address) external view returns (uint256 imdSpent, uint256 pleaHeld, uint256 avgBuyTime);
     function fundWall(uint256 amount) external;
     function seed() external;
-}
-
-interface ILaureates {
-    function mint(address to, uint256 seasonKey, uint8 rank, uint256 pleaId) external returns (uint256 tokenId);
-    function nameOf(address wallet) external view returns (string memory);
 }
 
 interface ISeasons {

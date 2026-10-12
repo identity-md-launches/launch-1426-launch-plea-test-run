@@ -5,21 +5,21 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {IPoolManager} from "v4-core/interfaces/IPoolManager.sol";
 import {Currency} from "v4-core/types/Currency.sol";
-import {IPLEA, IGate, ILaureates, IPleaHook} from "./interfaces/IPleaParts.sol";
+import {IPLEA, IGate, IPleaHook} from "./interfaces/IPleaParts.sol";
 
 /// @title Seasons — PLEA's leaderboard and prizes while the Cabal lives
 /// @notice Seasons of `SEASON` each run back to back from the moment trading opens; the last one
 /// ends when the Cabal dies. An approved plea earns its judges' score (0-45) as points; each
 /// wallet's best three count. When a season ends anyone calls `closeSeason`: the top 10 with at
-/// least 60 points are paid 25/18/14/11/9/7/6/4/3/3 % of the prize pot in IMD, unpaid shares roll
-/// over, and the season's five best pleas are minted as Laureates. The pot is fed by the hook's
+/// least 60 points are paid 25/18/14/11/9/7/6/4/3/3 % of the prize pot in IMD and unpaid shares roll
+/// over. The pot is fed by the hook's
 /// 0.25% prize fee. After the last season is closed, whatever is left goes to the buy wall.
 /// @notice PLEA bonus: Seasons holds 3% of the supply, minted to it at launch. Each of the first
 /// six seasons pays 0.5% of the supply (5,000,000 PLEA) to the same top 10 with the same shares;
 /// a share nobody qualifies for is burned when the season closes. If the Cabal dies before the
 /// sixth season, `flushToWall` burns the rest. Nobody can withdraw it.
-/// @notice The owner of PLEA does not play: its pleas earn no points, and no prize, bonus or
-/// Laureate goes to it, so the prize fee always leaves the team for good.
+/// @notice The owner of PLEA does not play: its pleas earn no points, and no prize or bonus goes
+/// to it, so the prize fee always leaves the team for good.
 contract Seasons {
     using SafeERC20 for IERC20;
 
@@ -34,7 +34,6 @@ contract Seasons {
     event Recorded(uint256 indexed pleaId, uint256 indexed season, address indexed wallet, uint8 score, uint16 points);
     event SeasonClosedOut(uint256 indexed season, uint256 pot, uint256 paid);
     event PrizePaid(uint256 indexed season, address indexed wallet, uint8 rank, uint256 amount);
-    event LaureateMinted(uint256 indexed season, uint256 indexed pleaId, uint8 rank, uint256 tokenId);
     event LeftoverToWall(uint256 amount);
     event PrizeFunded(uint256 indexed season, uint256 amount);
     event BonusPaid(uint256 indexed season, address indexed wallet, uint8 rank, uint256 amount);
@@ -46,15 +45,9 @@ contract Seasons {
         uint64 pleaId; // newest of the counted best three pleas (ties go to the earlier one)
     }
 
-    struct PleaEntry {
-        uint64 pleaId;
-        uint8 score;
-    }
-
     // ---------------------------------------------------------------- agreed numbers
     uint256 public constant MIN_POINTS = 60;
     uint256 public constant TOP = 10;
-    uint256 public constant LAUREATES_PER_SEASON = 5;
     /// @notice After a season ends, time to record late approvals before it can be closed.
     uint256 public constant CLOSE_GRACE = 1 hours;
     /// @notice The PLEA bonus: 0.5% of the supply for each of the first six seasons (3% in all).
@@ -67,7 +60,6 @@ contract Seasons {
     uint256 public immutable SEASON;
 
     mapping(uint256 => Entry[10]) internal _top;
-    mapping(uint256 => PleaEntry[5]) internal _topPleas;
     mapping(uint256 => mapping(address => uint8[3])) internal _best;
     mapping(uint256 => mapping(address => uint64[3])) internal _bestPleaIds;
     mapping(uint256 => bool) public closed;
@@ -93,10 +85,6 @@ contract Seasons {
 
     function topOf(uint256 season) external view returns (Entry[10] memory) {
         return _top[season];
-    }
-
-    function topPleasOf(uint256 season) external view returns (PleaEntry[5] memory) {
-        return _topPleas[season];
     }
 
     function bestOf(uint256 season, address wallet) external view returns (uint8[3] memory) {
@@ -175,7 +163,6 @@ contract Seasons {
 
     function _record(uint256 pleaId, uint256 season, address seller, uint8 score) internal {
         recorded[pleaId] = true;
-        _insertPlea(season, uint64(pleaId), score);
         uint8[3] storage b = _best[season][seller];
         uint64[3] storage ids = _bestPleaIds[season][seller];
         uint256 mi;
@@ -226,32 +213,11 @@ contract Seasons {
         }
     }
 
-    function _insertPlea(uint256 season, uint64 pleaId, uint8 score) internal {
-        PleaEntry[5] storage t = _topPleas[season];
-        PleaEntry[5] memory m = t;
-        uint256 n = LAUREATES_PER_SEASON;
-        PleaEntry memory ne = PleaEntry({pleaId: pleaId, score: score});
-        if (!_betterPlea(ne, m[n - 1])) return;
-        uint256 i = n - 1;
-        while (i > 0 && _betterPlea(ne, m[i - 1])) {
-            m[i] = m[i - 1];
-            --i;
-        }
-        m[i] = ne;
-        for (uint256 k = i; k < n; ++k) {
-            t[k] = m[k];
-        }
-    }
-
-    function _betterPlea(PleaEntry memory a, PleaEntry memory b) internal pure returns (bool) {
-        if (b.pleaId == 0) return true;
-        return a.score > b.score || (a.score == b.score && a.pleaId < b.pleaId);
-    }
-
     // ================================================================ closing
 
     /// @notice Closes the oldest open season once it has ended (plus a one-hour grace): records any
-    /// listed approvals first, pays the top 10, mints the top 5 Laureates. Anyone may call it.
+    /// listed approvals first, then pays the top 10 (IMD and, in the first six seasons, the PLEA
+    /// bonus). Anyone may call it.
     function closeSeason(uint256[] calldata pleaIds) external {
         for (uint256 i; i < pleaIds.length; ++i) {
             _tryRecord(pleaIds[i]);
@@ -283,17 +249,6 @@ contract Seasons {
         emit SeasonClosedOut(season, amountIn, paid);
 
         if (season < BONUS_SEASONS) _payBonus(season, t);
-
-        PleaEntry[5] memory lp = _topPleas[season];
-        ILaureates l = ILaureates(plea.laureates());
-        address owner_ = plea.owner();
-        for (uint256 i; i < LAUREATES_PER_SEASON; ++i) {
-            if (lp[i].pleaId == 0) break;
-            (address seller,,,) = gate.result(lp[i].pleaId);
-            if (seller == owner_) continue;
-            uint256 tokenId = l.mint(seller, season, uint8(i + 1), lp[i].pleaId);
-            emit LaureateMinted(season, lp[i].pleaId, uint8(i + 1), tokenId);
-        }
     }
 
     /// @notice Once the Cabal is dead and its last season closed, anyone sends what is left (unpaid

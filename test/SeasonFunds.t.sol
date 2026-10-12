@@ -4,7 +4,6 @@ pragma solidity 0.8.26;
 import {Test} from "forge-std/Test.sol";
 import {PLEA} from "../src/PLEA.sol";
 import {Seasons} from "../src/Seasons.sol";
-import {Laureates} from "../src/Laureates.sol";
 import {PleaDistributor} from "../src/PleaDistributor.sol";
 import {MockIMD} from "./utils/Mocks.sol";
 import {IPoolManager} from "v4-core/interfaces/IPoolManager.sol";
@@ -65,10 +64,9 @@ contract SeasonFundsTest is Test {
         pm = IPoolManager(deployCode("PoolManager.sol:PoolManager", abi.encode(address(this))));
         plea = new PLEA(address(this));
         seasons = new Seasons(address(plea), address(gate), address(imd));
-        Laureates laureates = new Laureates(address(plea));
         PleaDistributor distributor = new PleaDistributor(address(plea), address(this));
         wall = new PrizeWall(imd);
-        plea.setLauncher(address(gate), address(seasons), address(laureates), address(distributor));
+        plea.setLauncher(address(gate), address(seasons), address(distributor));
         plea.init(address(wall), address(pm));
     }
 

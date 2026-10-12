@@ -5,7 +5,6 @@ import {Test} from "forge-std/Test.sol";
 import {PLEA} from "../src/PLEA.sol";
 import {CabalGate} from "../src/CabalGate.sol";
 import {Seasons} from "../src/Seasons.sol";
-import {Laureates} from "../src/Laureates.sol";
 import {PleaDistributor} from "../src/PleaDistributor.sol";
 import {Letterbox} from "../src/Letterbox.sol";
 import {PleaLaunch} from "../src/PleaLaunch.sol";
@@ -24,17 +23,17 @@ contract ManifestFactory {
         }
     }
 
-    function deployAll(bytes[7] memory codes) external returns (address[7] memory deployed) {
-        for (uint256 i; i < 7; ++i) {
+    function deployAll(bytes[5] memory codes) external returns (address[5] memory deployed) {
+        for (uint256 i; i < 5; ++i) {
             deployed[i] = deploy(codes[i], bytes32(i));
         }
     }
 }
 
 abstract contract ManifestFixture is Test {
-    // Exact static constructor values from the supplied launch.json. Only $owner and earlier
-    // contract references are resolved locally; no external contract is installed or called.
-    // Exact static constructor values from the supplied launch.json (Sepolia test run 2).
+    // Exact static constructor values from the supplied launch.json (Sepolia test run 3). Only
+    // $owner and earlier contract references are resolved locally; no external contract is
+    // installed or called.
     address constant INTAKE = 0xa43e6F75ee006411F79Ac1C84120606C2330DE82;
     address constant ORACLE_ASSET = 0x44a1Cd38474FB1748400E7DEb5F8D786ccE3F89A;
     address constant IMD = 0x2B69099E59b05901faA1DD164fabf098bf831E82;
@@ -44,11 +43,17 @@ abstract contract ManifestFixture is Test {
     uint256 constant START = 1792162800;
     uint256 constant SEASON = 18_000;
     uint256 constant CREDIT_GAS = 1_300_000;
+    bool constant MINT_ORACLE_FEE = true;
+    /// @dev Ethereum's per-transaction gas cap (EIP-7825), and the headroom IMD's deployer adds to
+    /// a launch's gas limit (limit / used was 1.175-1.214 on its last four launches).
+    uint256 constant TX_GAS_CAP = 16_777_216;
+    uint256 constant IMD_GAS_HEADROOM_BPS = 12_200;
 
     ManifestFactory factory;
     address owner;
-    bytes[7] codes;
-    address[7] expected;
+    bytes[5] codes;
+    address[5] expected;
+    bytes32 letterboxHash;
 
     function setUp() public virtual {
         vm.chainId(11155111);
@@ -56,6 +61,7 @@ abstract contract ManifestFixture is Test {
         vm.warp(START - 1 days);
         owner = makeAddr("manifest owner");
         factory = new ManifestFactory();
+        letterboxHash = keccak256(vm.getCode("Letterbox.sol:Letterbox"));
         _prepare(0, "PLEA.sol:PLEA", abi.encode(owner));
         _prepare(
             1,
@@ -63,28 +69,23 @@ abstract contract ManifestFixture is Test {
             abi.encode(expected[0], INTAKE, ORACLE_ASSET, IMD, SIGNER, SEASON, uint256(118800))
         );
         _prepare(2, "Seasons.sol:Seasons", abi.encode(expected[0], expected[1], IMD));
-        _prepare(3, "Laureates.sol:Laureates", abi.encode(expected[0]));
-        _prepare(4, "PleaDistributor.sol:PleaDistributor", abi.encode(expected[0], owner));
+        _prepare(3, "PleaDistributor.sol:PleaDistributor", abi.encode(expected[0], owner));
         _prepare(
-            5,
-            "Letterbox.sol:Letterbox",
-            abi.encode(expected[0], expected[1], expected[2], expected[3], IMD, ORACLE_ASSET, true)
-        );
-        _prepare(
-            6,
+            4,
             "PleaLaunch.sol:PleaLaunch",
             abi.encode(
                 expected[0],
                 expected[1],
                 expected[2],
                 expected[3],
-                expected[4],
-                expected[5],
                 POOL_MANAGER,
                 IMD,
                 STACKER,
                 CREDIT_GAS,
-                START
+                START,
+                ORACLE_ASSET,
+                MINT_ORACLE_FEE,
+                letterboxHash
             )
         );
     }
@@ -103,14 +104,13 @@ abstract contract ManifestFixture is Test {
         PLEA p = PLEA(expected[0]);
         CabalGate g = CabalGate(expected[1]);
         Seasons s = Seasons(expected[2]);
-        PleaLaunch l = PleaLaunch(expected[6]);
+        PleaLaunch l = PleaLaunch(expected[4]);
         assertEq(p.owner(), owner);
-        assertEq(p.launcher(), expected[6]);
-        assertEq(p.letterbox(), expected[5]);
+        assertEq(p.launcher(), expected[4]);
+        assertEq(p.letterbox(), address(0), "the Letterbox is deployed after the launch");
         assertEq(p.gate(), expected[1]);
         assertEq(p.seasons(), expected[2]);
-        assertEq(p.laureates(), expected[3]);
-        assertEq(p.distributor(), expected[4]);
+        assertEq(p.distributor(), expected[3]);
         assertEq(address(g.plea()), expected[0]);
         assertEq(address(g.intake()), INTAKE);
         assertEq(address(g.oracleAsset()), ORACLE_ASSET);
@@ -124,14 +124,18 @@ abstract contract ManifestFixture is Test {
         assertEq(address(s.gate()), expected[1]);
         assertEq(address(s.imd()), IMD);
         assertEq(s.SEASON(), SEASON);
-        assertEq(address(Laureates(expected[3]).plea()), expected[0]);
-        assertEq(address(PleaDistributor(expected[4]).plea()), expected[0]);
-        assertEq(PleaDistributor(expected[4]).owner(), owner);
+        assertEq(address(PleaDistributor(expected[3]).plea()), expected[0]);
+        assertEq(PleaDistributor(expected[3]).owner(), owner);
         assertEq(l.plea(), expected[0]);
         assertEq(l.gate(), expected[1]);
+        assertEq(l.seasons(), expected[2]);
         assertEq(l.owner(), owner);
         assertEq(l.poolManager(), POOL_MANAGER);
+        assertEq(l.imd(), IMD);
         assertEq(l.START(), START);
+        assertEq(l.oracleAsset(), ORACLE_ASSET);
+        assertEq(l.mintOracleFee(), MINT_ORACLE_FEE);
+        assertEq(l.letterboxCodeHash(), keccak256(type(Letterbox).creationCode));
         assertEq(l.hookInitCodeHash(), keccak256(_hookCode()));
         assertEq(p.totalSupply(), 0, "hook deployment must remain a separate step");
         assertEq(p.hook(), address(0));
@@ -146,24 +150,36 @@ abstract contract ManifestFixture is Test {
             abi.encode(POOL_MANAGER, expected[0], IMD, STACKER, owner, expected[2], CREDIT_GAS)
         );
     }
+
+    /// @dev EIP-2028 gas of the factory call's data (16 per non-zero byte, 4 per zero byte).
+    function _txDataGas(bytes memory data) internal pure returns (uint256 g) {
+        for (uint256 i; i < data.length; ++i) {
+            g += data[i] == 0 ? 4 : 16;
+        }
+    }
 }
 
 contract AtomicManifestTest is ManifestFixture {
+    /// The five-contract launch in one factory transaction, measured as the chain charges it: the
+    /// init codes come in as transaction data (EIP-2028) and execute from memory. It must fit under
+    /// Ethereum's 16,777,216-gas cap even with the headroom IMD's deployer adds to the gas limit.
     function test_factoryDeploysExactManifestOnAnEmptySepoliaChain() public {
         assertEq(
             INTAKE.code.length + ORACLE_ASSET.code.length + IMD.code.length + POOL_MANAGER.code.length
                 + STACKER.code.length,
             0
         );
+        bytes[5] memory m = codes;
+        uint256 dataGas = _txDataGas(abi.encodeCall(ManifestFactory.deployAll, (m)));
         uint256 before = gasleft();
-        address[7] memory deployed = factory.deployAll(codes);
-        uint256 gasUsed = before - gasleft();
-        emit log_named_uint("seven-contract factory deployment gas", gasUsed);
-        // Sepolia accepts this in one transaction (launch #1242's deploy used 81.8M gas there). The
-        // mainnet branch must stay under Ethereum's 16,777,216 per-transaction cap; this one is
-        // the full code and only reports how far it is from that cap.
-        emit log_named_int("margin to the 16,777,216 mainnet cap", int256(16_777_216) - int256(gasUsed));
-        for (uint256 i; i < 7; ++i) {
+        address[5] memory deployed = factory.deployAll(m);
+        uint256 txGas = 21_000 + dataGas + (before - gasleft());
+        uint256 limit = txGas * IMD_GAS_HEADROOM_BPS / 10_000;
+        emit log_named_uint("five-contract launch transaction gas", txGas);
+        emit log_named_uint("gas limit with IMD's headroom", limit);
+        emit log_named_int("margin to the 16,777,216 cap", int256(TX_GAS_CAP) - int256(limit));
+        assertLt(limit, TX_GAS_CAP, "the launch must fit one mainnet transaction");
+        for (uint256 i; i < 5; ++i) {
             assertEq(deployed[i], expected[i]);
             bytes memory runtime = deployed[i].code;
             assertGt(runtime.length, 0);
@@ -180,6 +196,15 @@ contract AtomicManifestTest is ManifestFixture {
         }
         _assertWiring();
     }
+
+    /// launch.json commits to this build's Letterbox: its code hash argument must match.
+    function test_launchJsonCommitsToThisLetterbox() public view {
+        string memory json = vm.readFile("launch.json");
+        assertEq(vm.parseJsonString(json, ".contracts[4].contract"), "PleaLaunch");
+        bytes32 committed = vm.parseBytes32(vm.parseJsonString(json, ".contracts[4].constructorArgs[11]"));
+        assertEq(committed, keccak256(type(Letterbox).creationCode), "update launch.json after changing Letterbox");
+        assertEq(committed, letterboxHash);
+    }
 }
 
 contract RehearsalManifestTest is ManifestFixture {
@@ -190,7 +215,7 @@ contract RehearsalManifestTest is ManifestFixture {
     }
 
     function test_separateConstructorCallsInDeploymentBlockStillWork() public {
-        for (uint256 i = 1; i < 7; ++i) {
+        for (uint256 i = 1; i < 5; ++i) {
             factory.deploy(codes[i], bytes32(i));
         }
         _assertWiring();
@@ -198,37 +223,59 @@ contract RehearsalManifestTest is ManifestFixture {
 
     function test_laterBlockCannotRegisterLauncher() public {
         vm.roll(vm.getBlockNumber() + 1);
-        for (uint256 i = 1; i < 6; ++i) {
+        for (uint256 i = 1; i < 4; ++i) {
             factory.deploy(codes[i], bytes32(i));
         }
         vm.expectRevert(PLEA.NotDeployTx.selector);
-        factory.deploy(codes[6], bytes32(uint256(6)));
+        factory.deploy(codes[4], bytes32(uint256(4)));
     }
 
     /// @dev Reproduces the accepted informational finding; real launch must use deployAll atomically.
     function test_separateTransactionsLeaveTheAcceptedDeploymentBlockWindow() public {
         address attacker = makeAddr("deployment-block attacker");
         vm.prank(attacker);
-        PLEA(expected[0]).setLauncher(expected[1], expected[2], expected[3], expected[4]);
+        PLEA(expected[0]).setLauncher(expected[1], expected[2], expected[3]);
         assertEq(PLEA(expected[0]).launcher(), attacker);
-        for (uint256 i = 1; i < 6; ++i) {
+        for (uint256 i = 1; i < 4; ++i) {
             factory.deploy(codes[i], bytes32(i));
         }
         vm.expectRevert(PLEA.AlreadySet.selector);
-        factory.deploy(codes[6], bytes32(uint256(6)));
+        factory.deploy(codes[4], bytes32(uint256(4)));
     }
 }
 
-contract PostLaunchHookTest is ManifestFixture {
+contract PostLaunchTest is ManifestFixture {
     function setUp() public override {
         super.setUp();
         factory.deployAll(codes);
     }
 
+    /// After the launch: anyone deploys the committed Letterbox (its own transaction, well under
+    /// the cap); it reads its settings from PleaLaunch, and PLEA registers it once.
+    function test_committedLetterboxDeploysLater() public {
+        vm.roll(vm.getBlockNumber() + 1);
+        PleaLaunch l = PleaLaunch(expected[4]);
+        bytes memory code = vm.getCode("Letterbox.sol:Letterbox");
+        vm.expectRevert(PleaLaunch.WrongInitCode.selector);
+        l.deployLetterbox(bytes.concat(code, hex"00"));
+        uint256 dataGas = _txDataGas(abi.encodeCall(PleaLaunch.deployLetterbox, (code)));
+        vm.prank(makeAddr("anyone"));
+        uint256 before = gasleft();
+        address lb = l.deployLetterbox(code);
+        uint256 txGas = 21_000 + dataGas + (before - gasleft());
+        emit log_named_uint("deployLetterbox transaction gas", txGas);
+        assertLt(txGas * IMD_GAS_HEADROOM_BPS / 10_000, TX_GAS_CAP);
+        assertEq(lb, l.predictLetterbox());
+        assertEq(PLEA(expected[0]).letterbox(), lb);
+        assertEq(Letterbox(payable(lb)).nameOf(owner), "");
+        vm.expectRevert(PleaLaunch.LetterboxAlreadyDeployed.selector);
+        l.deployLetterbox(code);
+    }
+
     function test_committedHookDeploysLaterAndMintsOnlyTheFixedSplit() public {
         _assertWiring();
         vm.roll(vm.getBlockNumber() + 1);
-        PleaLaunch l = PleaLaunch(expected[6]);
+        PleaLaunch l = PleaLaunch(expected[4]);
         bytes memory code = _hookCode();
         bytes32 hash = keccak256(code);
         uint160 flags = l.FLAGS();
@@ -244,7 +291,7 @@ contract PostLaunchHookTest is ManifestFixture {
         assertEq(p.totalSupply(), 1_000_000_000e18);
         assertEq(p.balanceOf(h), 870_000_000e18);
         assertEq(p.balanceOf(expected[2]), 30_000_000e18);
-        assertEq(p.balanceOf(expected[4]), 100_000_000e18);
+        assertEq(p.balanceOf(expected[3]), 100_000_000e18);
         assertEq(PleaHook(h).owner(), owner);
         assertEq(address(PleaHook(h).stacker()), STACKER);
         assertEq(PleaHook(h).seasons(), expected[2]);

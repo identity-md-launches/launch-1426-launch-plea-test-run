@@ -5,9 +5,10 @@ import {Fixture} from "./utils/Fixture.sol";
 import {CabalGate} from "../src/CabalGate.sol";
 import {PLEA} from "../src/PLEA.sol";
 import {Letterbox} from "../src/Letterbox.sol";
-import {Laureates} from "../src/Laureates.sol";
 import {Seasons} from "../src/Seasons.sol";
 import {PleaHook} from "../src/PleaHook.sol";
+import {PleaLaunch} from "../src/PleaLaunch.sol";
+import {PleaDistributor} from "../src/PleaDistributor.sol";
 import {MockIMD} from "./utils/Mocks.sol";
 
 /// Letters and auto-sell: plead by sending text to the Letterbox, fees paid in PLEA, escrow,
@@ -172,7 +173,7 @@ contract LetterboxTest is Fixture {
         assertGt(imd.balanceOf(bob) - imdBefore, TIP, "the sale and the writer's own tip");
         vm.prank(bob);
         letterbox.letter("NAME bob_by_explorer");
-        assertEq(laureates.nameOf(bob), "bob_by_explorer");
+        assertEq(letterbox.nameOf(bob), "bob_by_explorer");
 
         // The same refusals: a stranger's SELL, and ETH.
         vm.prank(carol);
@@ -196,9 +197,9 @@ contract LetterboxTest is Fixture {
         vm.prank(bob);
         (bool ok,) = address(letterbox).call("NAME bob_the_holder");
         assertTrue(ok);
-        assertEq(laureates.nameOf(bob), "bob_the_holder");
+        assertEq(letterbox.nameOf(bob), "bob_the_holder");
         assertEq(gate.lastPleaOf(bob), 0);
-        assertLetterReverts(bob, "NAME Bad Name", abi.encodeWithSelector(Laureates.BadName.selector));
+        assertLetterReverts(bob, "NAME Bad Name", abi.encodeWithSelector(Letterbox.BadName.selector));
     }
 
     function test_letterRefusesEthTinyBalancesAndBadText() public {
@@ -236,8 +237,6 @@ contract LetterboxTest is Fixture {
         vm.prank(alice);
         vm.expectRevert(PLEA.CabalIsWatching.selector);
         plea.transfer(address(letterbox), 1e18);
-        vm.expectRevert(Laureates.NotLetterbox.selector);
-        laureates.setNameFor(alice, "alice");
     }
 
     // ---------------------------------------------------------------- deliver
@@ -428,7 +427,7 @@ contract LetterboxTest is Fixture {
         assertTrue(vm.contains(b, "1. 0x"), b);
         assertTrue(vm.contains(b, "40 pts (needs 60)"), b);
         vm.prank(alice);
-        laureates.setName("alice_w");
+        letterbox.setName("alice_w");
         assertTrue(vm.contains(letterbox.leaderboard(), "1. alice_w"), letterbox.leaderboard());
     }
 
@@ -442,58 +441,123 @@ contract LetterboxTest is Fixture {
         assertFalse(ok);
     }
 
-    // ---------------------------------------------------------------- Laureates
+    // ---------------------------------------------------------------- names
 
-    function test_letterLaureateWearsTheSeal() public {
-        uint256 id = letter(alice, "A tenth for my sister's school trip; the rest stays put.");
-        answer(id, 44);
-        letterbox.deliver(id);
-        uint256 site = plead(bob, plea.balanceOf(bob) / 10);
-        answer(site, 43);
+    /// A `NAME` letter and the site's `setName` follow the same rules: 3-20 characters a-z 0-9 _,
+    /// unique, reserved words refused; a failed rename keeps the old name.
+    function test_invalidNamesAndFailedRenamesPreserveTheOldReservation() public {
+        vm.prank(alice);
+        letterbox.setName("alice_1");
+        string[12] memory invalid = [
+            "a",
+            "ab",
+            "abcdefghijklmnopqrstu",
+            "Alice",
+            "bad name",
+            "bad-name",
+            "cabal",
+            "admin",
+            "imd",
+            "plea",
+            "owner",
+            "a\nb"
+        ];
+        for (uint256 i; i < invalid.length; ++i) {
+            vm.prank(alice);
+            vm.expectRevert(Letterbox.BadName.selector);
+            letterbox.setName(invalid[i]);
+            assertLetterReverts(
+                alice, bytes(string.concat("NAME ", invalid[i])), abi.encodeWithSelector(Letterbox.BadName.selector)
+            );
+            assertEq(letterbox.nameOf(alice), "alice_1");
+            assertEq(letterbox.nameOwner(keccak256("alice_1")), alice);
+        }
         vm.prank(bob);
-        gate.executeSell(0);
-        seasons.record(site);
-        // The Cabal dies after 33 silent hours, which ends the season early; then it can close.
-        vm.warp(uint256(gate.lastVerdictAt()) + gate.DEADMAN() + 1 hours);
-        seasons.closeSeason(new uint256[](0));
-        string memory uriLetter = laureates.tokenURI(1);
-        string memory uriSite = laureates.tokenURI(2);
-        assertTrue(_decodedContains(uriLetter, "By letter"));
-        assertFalse(_decodedContains(uriSite, "By letter"));
+        letterbox.setName("bob_2");
+        vm.prank(alice);
+        vm.expectRevert(Letterbox.NameTaken.selector);
+        letterbox.setName("bob_2");
+        assertLetterReverts(alice, "NAME bob_2", abi.encodeWithSelector(Letterbox.NameTaken.selector));
+        assertEq(letterbox.nameOwner(keccak256("alice_1")), alice);
+        assertEq(letterbox.nameOwner(keccak256("bob_2")), bob);
     }
 
-    function _decodedContains(string memory uri, string memory needle) internal pure returns (bool) {
-        bytes memory b = bytes(uri);
-        bytes memory prefix = bytes("data:application/json;base64,");
-        bytes memory enc = new bytes(b.length - prefix.length);
-        for (uint256 i; i < enc.length; ++i) {
-            enc[i] = b[prefix.length + i];
+    function testFuzz_namesAreUniqueIdempotentAndReleasedOnClear(uint256 seed, uint8 rawLength) public {
+        uint256 length = bound(rawLength, 3, 20);
+        bytes memory name = new bytes(length);
+        name[0] = "_"; // avoids reserved words while exercising the whole remaining alphabet
+        bytes memory alphabet = "abcdefghijklmnopqrstuvwxyz0123456789_";
+        for (uint256 i = 1; i < length; ++i) {
+            name[i] = alphabet[uint256(keccak256(abi.encode(seed, i))) % alphabet.length];
         }
-        return vm.contains(string(_b64decode(enc)), needle);
+        vm.startPrank(alice);
+        letterbox.setName(string(name));
+        letterbox.setName(string(name));
+        vm.stopPrank();
+        assertEq(letterbox.nameOf(alice), string(name));
+        assertEq(letterbox.nameOwner(keccak256(name)), alice);
+        vm.prank(bob);
+        vm.expectRevert(Letterbox.NameTaken.selector);
+        letterbox.setName(string(name));
+        letter(alice, "NAME "); // an empty NAME clears it
+        assertEq(letterbox.nameOf(alice), "");
+        vm.prank(bob);
+        letterbox.setName(string(name));
+        assertEq(letterbox.nameOwner(keccak256(name)), bob);
     }
 
-    function _b64decode(bytes memory data) internal pure returns (bytes memory out) {
-        bytes memory table = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-        uint8[128] memory rev;
-        for (uint8 i; i < 64; ++i) {
-            rev[uint8(table[i])] = i;
-        }
-        uint256 pad;
-        if (data.length > 0 && data[data.length - 1] == "=") ++pad;
-        if (data.length > 1 && data[data.length - 2] == "=") ++pad;
-        out = new bytes(data.length / 4 * 3 - pad);
-        uint256 j;
-        for (uint256 i; i < data.length; i += 4) {
-            uint256 n = (uint256(rev[uint8(data[i])]) << 18) | (uint256(rev[uint8(data[i + 1])]) << 12)
-                | (uint256(rev[uint8(data[i + 2])]) << 6) | uint256(rev[uint8(data[i + 3])]);
-            if (j < out.length) out[j++] = bytes1(uint8(n >> 16));
-            if (j < out.length) out[j++] = bytes1(uint8(n >> 8));
-            if (j < out.length) out[j++] = bytes1(uint8(n));
-        }
+    // ---------------------------------------------------------------- deployment after the launch
+
+    /// The Letterbox is deployed after the launch through PleaLaunch, once, from the committed code;
+    /// it reads its settings from PleaLaunch and PLEA registers it.
+    function test_letterboxIsDeployedOnceFromTheCommittedCode() public {
+        assertEq(address(letterbox), launch.letterbox());
+        assertEq(address(letterbox), launch.predictLetterbox());
+        assertEq(plea.letterbox(), address(letterbox));
+        assertEq(launch.letterboxCodeHash(), keccak256(type(Letterbox).creationCode));
+        vm.expectRevert(PleaLaunch.LetterboxAlreadyDeployed.selector);
+        launch.deployLetterbox(type(Letterbox).creationCode);
+        vm.prank(OWNER);
+        vm.expectRevert(PLEA.NotLauncher.selector);
+        plea.setLetterbox(alice);
+    }
+
+    function test_deployLetterboxRefusesOtherCode() public {
+        PleaLaunch fresh = _freshLaunch();
+        bytes memory other = abi.encodePacked(type(Letterbox).creationCode, uint256(1));
+        vm.expectRevert(PleaLaunch.WrongInitCode.selector);
+        fresh.deployLetterbox(other);
+        vm.prank(makeAddr("anyone"));
+        address lb = fresh.deployLetterbox(type(Letterbox).creationCode);
+        assertEq(lb, fresh.predictLetterbox());
+        assertEq(fresh.letterbox(), lb);
+        assertEq(PLEA(fresh.plea()).letterbox(), lb, "registered by PLEA");
+    }
+
+    /// A second launch's contracts (PLEA, gate, seasons, distributor, PleaLaunch) in one call.
+    function _freshLaunch() internal returns (PleaLaunch fresh) {
+        PLEA p = new PLEA(OWNER);
+        CabalGate g = new CabalGate(address(p), address(intake), address(oimd), address(imd), SIGNER, SEASON, DEADMAN);
+        Seasons ss = new Seasons(address(p), address(g), address(imd));
+        PleaDistributor d = new PleaDistributor(address(p), OWNER);
+        fresh = new PleaLaunch(
+            address(p),
+            address(g),
+            address(ss),
+            address(d),
+            address(pm),
+            address(imd),
+            address(stacker),
+            CREDIT_GAS,
+            T0 + 2 days,
+            address(oimd),
+            true,
+            keccak256(type(Letterbox).creationCode)
+        );
     }
 }
 
-/// The owner of PLEA does not play: no points, prizes, bonus, Laureates or keeper tips.
+/// The owner of PLEA does not play: no points, prizes, bonus or keeper tips.
 contract OwnerExclusionTest is Fixture {
     function setUp() public virtual override {
         super.setUp();
@@ -514,7 +578,6 @@ contract OwnerExclusionTest is Fixture {
         ids[0] = id;
         seasons.closeSeason(ids);
         assertFalse(seasons.recorded(id));
-        assertEq(laureates.totalSupply(), 0);
     }
 
     function _fillWallReserve() internal {
@@ -578,13 +641,30 @@ contract LetterboxMainnetPathTest is Fixture {
 
     function test_mintingTheFeeIsRefusedOnMainnet() public {
         vm.chainId(1);
+        LetterboxSettings mint = new LetterboxSettings(plea, gate, seasons, imd, oimd, true);
         vm.expectRevert(Letterbox.MintOnMainnet.selector);
-        new Letterbox(
-            address(plea), address(gate), address(seasons), address(laureates), address(imd), address(oimd), true
-        );
+        mint.deploy();
+        LetterboxSettings other = new LetterboxSettings(plea, gate, seasons, imd, oimd, false);
         vm.expectRevert(Letterbox.OracleAssetNotImd.selector);
-        new Letterbox(
-            address(plea), address(gate), address(seasons), address(laureates), address(imd), address(oimd), false
-        );
+        other.deploy();
+    }
+}
+
+/// @dev Stands in for PleaLaunch: holds the settings a Letterbox reads from its deployer.
+contract LetterboxSettings {
+    address public plea;
+    address public gate;
+    address public seasons;
+    address public imd;
+    address public oracleAsset;
+    bool public mintOracleFee;
+
+    constructor(PLEA p, CabalGate g, Seasons s, MockIMD i, MockIMD o, bool m) {
+        (plea, gate, seasons, imd, oracleAsset, mintOracleFee) =
+        (address(p), address(g), address(s), address(i), address(o), m);
+    }
+
+    function deploy() external returns (address) {
+        return address(new Letterbox());
     }
 }

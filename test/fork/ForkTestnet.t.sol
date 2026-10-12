@@ -6,7 +6,6 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {PLEA} from "../../src/PLEA.sol";
 import {CabalGate} from "../../src/CabalGate.sol";
 import {Seasons} from "../../src/Seasons.sol";
-import {Laureates} from "../../src/Laureates.sol";
 import {PleaDistributor} from "../../src/PleaDistributor.sol";
 import {Letterbox} from "../../src/Letterbox.sol";
 import {PleaLaunch} from "../../src/PleaLaunch.sol";
@@ -71,7 +70,6 @@ contract ForkTestnetTest is Test {
     PLEA plea;
     CabalGate gate;
     Seasons seasons;
-    Laureates laureates;
     Letterbox letterbox;
     PleaLaunch launch;
     PleaHook hook;
@@ -110,24 +108,23 @@ contract ForkTestnetTest is Test {
         plea = new PLEA(owner);
         gate = new CabalGate(address(plea), INTAKE, ORACLE_IMD, address(IMD), vm.addr(SIGNER_KEY), SEASON, DEADMAN);
         seasons = new Seasons(address(plea), address(gate), address(IMD));
-        laureates = new Laureates(address(plea));
         PleaDistributor distributor = new PleaDistributor(address(plea), owner);
-        letterbox = new Letterbox(
-            address(plea), address(gate), address(seasons), address(laureates), address(IMD), ORACLE_IMD, true
-        );
         launch = new PleaLaunch(
             address(plea),
             address(gate),
             address(seasons),
-            address(laureates),
             address(distributor),
-            address(letterbox),
             POOL_MANAGER,
             address(IMD),
             STACKER,
             CREDIT_GAS,
-            START
+            START,
+            ORACLE_IMD,
+            true,
+            keccak256(type(Letterbox).creationCode)
         );
+        // After the launch transaction: anyone deploys the committed Letterbox.
+        letterbox = Letterbox(launch.deployLetterbox(type(Letterbox).creationCode));
     }
 
     function _deployHook() internal {
@@ -445,7 +442,6 @@ contract ForkTestnetTest is Test {
         while (!seasons.finished()) {
             seasons.closeSeason(new uint256[](0));
         }
-        assertEq(laureates.ownerOf(1), a);
         seasons.flushToWall();
         assertEq(seasons.pot(), 0);
         assertEq(plea.balanceOf(address(seasons)), 0, "the unused PLEA bonus is burned");

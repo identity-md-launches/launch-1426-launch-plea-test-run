@@ -8,15 +8,15 @@ import {OracleAttestation} from "../../src/OracleAttestation.sol";
 import {PLEA} from "../../src/PLEA.sol";
 import {CabalGate} from "../../src/CabalGate.sol";
 import {Seasons} from "../../src/Seasons.sol";
-import {Laureates} from "../../src/Laureates.sol";
 import {PleaDistributor} from "../../src/PleaDistributor.sol";
 import {Letterbox} from "../../src/Letterbox.sol";
 import {PleaLaunch} from "../../src/PleaLaunch.sol";
 import {PleaHook} from "../../src/PleaHook.sol";
 import {MockIMD, MockSIMD, MockStacker, BuyRouter, MockIntake} from "./Mocks.sol";
 
-/// @dev Replays the launch (PLEA, CabalGate, Seasons, Laureates, PleaDistributor, PleaLaunch in one
-/// call context), mines the hook salt, deploys the hook and opens trading.
+/// @dev Replays the launch (PLEA, CabalGate, Seasons, PleaDistributor, PleaLaunch in one call
+/// context), deploys the Letterbox through PleaLaunch, mines the hook salt, deploys the hook and
+/// opens trading.
 contract Fixture is Test {
     address constant OWNER = 0x4b91078b2374c956A65F7Af0999CaE0a935E6821;
     /// @dev anvil's second account, used as the test oracle signer.
@@ -37,7 +37,6 @@ contract Fixture is Test {
     PLEA plea;
     CabalGate gate;
     Seasons seasons;
-    Laureates laureates;
     PleaDistributor distributor;
     Letterbox letterbox;
     PleaLaunch launch;
@@ -115,31 +114,24 @@ contract Fixture is Test {
             address(plea), address(intake), address(oracleFeeToken()), address(imd), SIGNER, SEASON, DEADMAN
         );
         seasons = new Seasons(address(plea), address(gate), address(imd));
-        laureates = new Laureates(address(plea));
         distributor = new PleaDistributor(address(plea), OWNER);
         MockIMD feeToken = oracleFeeToken();
-        letterbox = new Letterbox(
-            address(plea),
-            address(gate),
-            address(seasons),
-            address(laureates),
-            address(imd),
-            address(feeToken),
-            feeToken != imd
-        );
         launch = new PleaLaunch(
             address(plea),
             address(gate),
             address(seasons),
-            address(laureates),
             address(distributor),
-            address(letterbox),
             address(pm),
             address(imd),
             address(stacker),
             creditGasBudget(),
-            T0 + 1 days
+            T0 + 1 days,
+            address(feeToken),
+            feeToken != imd,
+            keccak256(type(Letterbox).creationCode)
         );
+        // After the launch: anyone deploys the committed Letterbox.
+        letterbox = Letterbox(launch.deployLetterbox(type(Letterbox).creationCode));
     }
 
     function hookInitCode() internal view returns (bytes memory) {

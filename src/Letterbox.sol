@@ -28,9 +28,14 @@ interface ISeasonsForLetters {
     }
 }
 
-interface ILaureatesForLetters {
-    function setNameFor(address wallet, string calldata name) external;
-    function nameOf(address wallet) external view returns (string memory);
+/// @dev PleaLaunch, which deploys the Letterbox after the launch and holds its settings.
+interface ILetterboxLaunch {
+    function plea() external view returns (address);
+    function gate() external view returns (address);
+    function seasons() external view returns (address);
+    function imd() external view returns (address);
+    function oracleAsset() external view returns (address);
+    function mintOracleFee() external view returns (bool);
 }
 
 interface IMintable {
@@ -45,7 +50,7 @@ interface IMintable {
 ///   any other text   a new plea for 10% of the writer's PLEA, sold automatically if approved;
 ///   `APPEAL <text>`  an appeal of the writer's latest denied plea, for its original amount;
 ///   `SELL`           the writer sells their own approved letter plea (if no runner did yet);
-///   `NAME <name>`    the writer's display name (the Laureates rules).
+///   `NAME <name>`    the writer's display name (3-20 characters a-z 0-9 _, unique; `setName`).
 /// Fees are paid in PLEA in the letter's own transaction: the gate sells just enough of the writer's
 /// PLEA (at most the hourly snapshot value + 10%) for the oracle fee, a 0.25 IMD runner tip and, for
 /// an appeal, the wall share. The plea's PLEA waits here in escrow. An approved plea is sold by
@@ -68,10 +73,13 @@ contract Letterbox is ReentrancyGuardTransient {
     error NoPrice();
     error MintOnMainnet();
     error OracleAssetNotImd();
+    error BadName();
+    error NameTaken();
 
     event Escrowed(uint256 indexed id, address indexed writer, uint256 amount, uint256 feePlea, uint8 flags);
     event Delivered(uint256 indexed id, address indexed runner, uint256 imdOut, uint256 tip);
     event Settled(uint256 indexed id, address indexed writer, uint256 amount, uint256 tip);
+    event NameSet(address indexed wallet, string name);
 
     /// @dev One storage slot: `amount` is at most the gate's 2.5M PLEA cap (checked before `_open`).
     struct Escrow {
@@ -106,7 +114,6 @@ contract Letterbox is ReentrancyGuardTransient {
     IPLEA internal immutable plea;
     CabalGate internal immutable gate;
     ISeasonsForLetters internal immutable seasons;
-    ILaureatesForLetters internal immutable laureates;
     IERC20 internal immutable imd;
     IERC20 internal immutable oracleAsset;
     /// @dev Sepolia: the oracle fee token is a separate test token anyone can mint, so the Letterbox
@@ -118,24 +125,26 @@ contract Letterbox is ReentrancyGuardTransient {
     mapping(uint256 => uint256) internal _soldFor;
     uint256 internal _openCount;
 
-    constructor(
-        address plea_,
-        address gate_,
-        address seasons_,
-        address laureates_,
-        address imd_,
-        address oracleAsset_,
-        bool mintOracleFee_
-    ) {
-        if (mintOracleFee_ && block.chainid == 1) revert MintOnMainnet();
-        if (!mintOracleFee_ && oracleAsset_ != imd_) revert OracleAssetNotImd();
-        plea = IPLEA(plea_);
-        gate = CabalGate(gate_);
-        seasons = ISeasonsForLetters(seasons_);
-        laureates = ILaureatesForLetters(laureates_);
+    mapping(address => string) internal _names;
+    /// @notice The wallet holding a display name (by the name's keccak256).
+    mapping(bytes32 => address) public nameOwner;
+
+    /// @dev Deployed by `PleaLaunch.deployLetterbox` after the launch: it reads its settings from its
+    /// deployer, so it takes no constructor arguments and its creation code, committed at launch, is
+    /// the same for every deployment.
+    constructor() {
+        ILetterboxLaunch l = ILetterboxLaunch(msg.sender);
+        address imd_ = l.imd();
+        address oracleAsset_ = l.oracleAsset();
+        bool mint_ = l.mintOracleFee();
+        if (mint_ && block.chainid == 1) revert MintOnMainnet();
+        if (!mint_ && oracleAsset_ != imd_) revert OracleAssetNotImd();
+        plea = IPLEA(l.plea());
+        gate = CabalGate(l.gate());
+        seasons = ISeasonsForLetters(l.seasons());
         imd = IERC20(imd_);
         oracleAsset = IERC20(oracleAsset_);
-        mintOracleFee = mintOracleFee_;
+        mintOracleFee = mint_;
     }
 
     // ================================================================ letters
@@ -155,7 +164,7 @@ contract Letterbox is ReentrancyGuardTransient {
         if (_isCommand(d, "APPEAL")) {
             _appeal(msg.sender, gate.lastPleaOf(msg.sender), string(d[7:]), BY_LETTER | AUTO_SELL);
         } else if (_isCommand(d, "NAME")) {
-            laureates.setNameFor(msg.sender, string(d[5:]));
+            _setName(msg.sender, d[5:]);
         } else if (_isWord(d, "SELL")) {
             uint256 id = _openOf[msg.sender];
             if (id == 0) revert NotOpen(0);
@@ -177,6 +186,47 @@ contract Letterbox is ReentrancyGuardTransient {
     /// @notice Appeal a denied plea with auto-sell, for its original amount.
     function appealAuto(uint256 originalId, string calldata text) external nonReentrant returns (uint256 id) {
         return _appeal(msg.sender, originalId, text, AUTO_SELL);
+    }
+
+    // ================================================================ names
+
+    /// @notice Sets the caller's display name: 3-20 characters of a-z, 0-9 and _, unique. An empty
+    /// name clears it. Reserved: cabal, admin, imd, plea, owner. A `NAME <name>` letter does the same.
+    function setName(string calldata name) external {
+        _setName(msg.sender, bytes(name));
+    }
+
+    function nameOf(address wallet) external view returns (string memory) {
+        return _names[wallet];
+    }
+
+    function _setName(address wallet, bytes calldata name) internal {
+        string memory old = _names[wallet];
+        if (bytes(old).length != 0) delete nameOwner[keccak256(bytes(old))];
+        if (name.length == 0) {
+            delete _names[wallet];
+            emit NameSet(wallet, "");
+            return;
+        }
+        _checkName(name);
+        bytes32 h = keccak256(name);
+        if (nameOwner[h] != address(0)) revert NameTaken();
+        nameOwner[h] = wallet;
+        _names[wallet] = string(name);
+        emit NameSet(wallet, string(name));
+    }
+
+    function _checkName(bytes calldata b) internal pure {
+        if (b.length < 3 || b.length > 20) revert BadName();
+        for (uint256 i; i < b.length; ++i) {
+            bytes1 c = b[i];
+            if (!((c >= "a" && c <= "z") || (c >= "0" && c <= "9") || c == "_")) revert BadName();
+        }
+        bytes32 h = keccak256(b);
+        if (
+            h == keccak256("cabal") || h == keccak256("admin") || h == keccak256("imd") || h == keccak256("plea")
+                || h == keccak256("owner")
+        ) revert BadName();
     }
 
     // ================================================================ runners
@@ -500,7 +550,7 @@ contract Letterbox is ReentrancyGuardTransient {
     }
 
     function _who(address w) internal view returns (string memory) {
-        string memory n = laureates.nameOf(w);
+        string memory n = _names[w];
         if (bytes(n).length != 0) return n;
         bytes memory h = bytes(Strings.toHexString(w));
         bytes memory s = new bytes(13);
