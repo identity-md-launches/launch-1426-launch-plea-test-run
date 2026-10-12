@@ -30,7 +30,7 @@ Launched through the IMD swarm straight from this repository (`launch.open` with
 
 | | |
 |---|---|
-| Supply | 1,000,000,000 PLEA (88% pool liquidity, 2% season bonus prizes, 10% Merkle distributor) |
+| Supply | 1,000,000,000 PLEA (87% pool liquidity, 3% season bonus prizes, 10% Merkle distributor) |
 | Pool | PLEA/IMD on Uniswap v4 with a fork of POOL4's CappedBurnHook: LP fee 0, the hook is the only LP, liquidity locked forever |
 | Selling | Through the Cabal's gate while it lives, from the site or by sending a letter (a text transaction); owner-allowlisted senders are exempt |
 | Judges | 30-seat oracle panel, quorum 17, score 0–45 |
@@ -117,11 +117,11 @@ The Cabal is born when trading opens and lives until **33 hours** pass without a
 - When a season ends, anyone calls `closeSeason(pleaIds)` after a **1-hour grace**:
   - the **top 10** wallets with at least **60 points** are paid **25 / 18 / 14 / 11 / 9 / 7 / 6 / 4 / 3 / 3 %** of the prize pot in IMD;
   - unpaid shares roll over to the next season;
-  - **PLEA bonus, first four seasons:** the same top 10 (same shares, same 60-point minimum) also split **5,000,000 PLEA** (0.5% of the supply) per season, from the 2% minted to `Seasons` at launch. Unpaid shares are burned at the close; nobody can withdraw the bonus, the owner included;
+  - **PLEA bonus, first six seasons:** the same top 10 (same shares, same 60-point minimum) also split **5,000,000 PLEA** (0.5% of the supply) per season, from the 3% minted to `Seasons` at launch. Unpaid shares are burned at the close; nobody can withdraw the bonus, the owner included;
   - the season's **five best pleas** are minted as **Laureate** NFTs to their authors, rendered fully on chain (JSON + SVG).
 - **The owner of PLEA does not play.** Its pleas earn no points, and no IMD prize, PLEA bonus or Laureate goes to it (also if ownership moved after points were recorded); its rank's share rolls over or is burned. The owner also gets no `rebalance()` keeper tip. So the prize fee and the wall always leave the team for good.
 - Holders can set a display name (`Laureates.setName`, 3–20 characters `a-z 0-9 _`, unique).
-- After the Cabal dies and its last season is closed, `flushToWall()` (anyone) sends what is left to the buy wall and burns the PLEA bonus of any of the first four seasons that never ran.
+- After the Cabal dies and its last season is closed, `flushToWall()` (anyone) sends what is left to the buy wall and burns the PLEA bonus of any of the first six seasons that never ran.
 - Prize PLEA is ordinary PLEA: selling it while the Cabal lives takes a plea. It has no buy record, so it adds to the balance (better share-of-balance points) but not to the bought holdings that earn the hold-time and P&L points.
 
 ---
@@ -173,7 +173,7 @@ The factory must deploy all seven atomically. PleaLaunch's constructor registers
 
 Then:
 
-1. **Deploy the hook.** `script/MineSalt.s.sol` mines a CREATE2 salt whose address carries the hook's flag bits and calls `PleaLaunch.deployHook(salt, initCode)`. The init code is committed at launch, so the result is fixed whoever calls it. PLEA then mints 88% to the hook, 2% to Seasons (the bonus prizes) and 10% to the distributor.
+1. **Deploy the hook.** `script/MineSalt.s.sol` mines a CREATE2 salt whose address carries the hook's flag bits and calls `PleaLaunch.deployHook(salt, initCode)`. The init code is committed at launch, so the result is fixed whoever calls it. PLEA then mints 87% to the hook, 3% to Seasons (the bonus prizes) and 10% to the distributor.
 
    ```
    LAUNCH=… POOL_MANAGER=… IMD=… STACKER=… SEASONS=… CREDIT_GAS=… \
@@ -197,7 +197,7 @@ Then:
 | Cashback credit gas | 1,300,000 (Sepolia's gas schedule) |
 | Letterbox | mints the 0.5 test oracle fee itself (`mintOracleFee = true`; refused on chain id 1, where the fee is bought with PLEA like the tip) |
 
-The seven-contract manifest rehearsal reports **23,845,372 gas**, a margin of **−7,068,156** against the 16,777,216 mainnet per-transaction cap. Sepolia accepts it in one transaction (launch #1242 used 81.8M there); the rehearsal reports the margin without enforcing the cap. This local measurement includes harness overhead and excludes transaction intrinsic gas; the deployment service must simulate the actual factory transaction. `test/fork/ForkTestnet.t.sol` rehearses the whole run on a Sepolia fork against the live Intake v2:
+The seven-contract manifest rehearsal reports **24,298,045 gas**, a margin of **−7,520,829** against the 16,777,216 mainnet per-transaction cap. Sepolia accepts it in one transaction (launch #1242 used 81.8M there); the rehearsal reports the margin without enforcing the cap. This local measurement includes harness overhead and excludes transaction intrinsic gas; the deployment service must simulate the actual factory transaction. `test/fork/ForkTestnet.t.sol` rehearses the whole run on a Sepolia fork against the live Intake v2:
 
 ```
 SEPOLIA_RPC_URL=https://ethereum-sepolia-rpc.publicnode.com forge test --match-path 'test/fork/*' -vv

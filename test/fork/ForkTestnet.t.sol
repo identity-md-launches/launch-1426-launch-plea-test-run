@@ -245,7 +245,7 @@ contract ForkTestnetTest is Test {
         assertEq(gate.SEASON(), SEASON);
         assertEq(gate.DEADMAN(), DEADMAN);
         assertEq(plea.hook(), address(hook));
-        assertEq(plea.balanceOf(address(seasons)), 20_000_000e18);
+        assertEq(plea.balanceOf(address(seasons)), 30_000_000e18);
         assertEq(hook.creditGas(), CREDIT_GAS);
         assertApproxEqRel(hook.capDecayPerDay(), (hook.inventoryCap() - hook.CAP_FLOOR()) / 25, 1e15, "25-day decay");
         assertTrue(gate.cabalAlive());
@@ -449,7 +449,7 @@ contract ForkTestnetTest is Test {
         seasons.flushToWall();
         assertEq(seasons.pot(), 0);
         assertEq(plea.balanceOf(address(seasons)), 0, "the unused PLEA bonus is burned");
-        assertEq(seasons.bonusBurned(), 20_000_000e18);
+        assertEq(seasons.bonusBurned(), 30_000_000e18);
     }
 
     function test_seasonWinnerGetsThePleaBonus() public {
@@ -475,7 +475,7 @@ contract ForkTestnetTest is Test {
         seasons.closeSeason(new uint256[](0)); // season 1: a has 81 points
         assertEq(plea.balanceOf(a) - before, 1_250_000e18);
         assertEq(seasons.bonusBurned(), 5_000_000e18 + 3_750_000e18);
-        assertEq(plea.balanceOf(address(seasons)), 10_000_000e18);
+        assertEq(plea.balanceOf(address(seasons)), 20_000_000e18);
 
         // the winner sells most of the prize through a plea, after the 4-hour cooldown
         _warp(_now() + 4 hours);

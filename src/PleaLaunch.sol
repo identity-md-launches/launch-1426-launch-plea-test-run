@@ -18,7 +18,7 @@ interface IPLEAForLaunch {
 /// @dev Last contract of the launch. Its constructor (inside the launch transaction) registers the
 /// system's contracts with PLEA and commits to the hook's exact init code. After launch, anyone
 /// calls `deployHook` with a salt mined off chain (script/MineSalt.s.sol): the hook lands on an
-/// address carrying its flag bits, and PLEA mints 88% to it, 2% to Seasons and 10% to the distributor. The result
+/// address carrying its flag bits, and PLEA mints 87% to it, 3% to Seasons and 10% to the distributor. The result
 /// is fully determined by the committed init code, so front-running `deployHook` changes nothing.
 /// `seed` opens trading: the owner may call it any time, anyone once `START` has passed.
 contract PleaLaunch {

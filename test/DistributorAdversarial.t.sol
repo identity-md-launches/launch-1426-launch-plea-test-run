@@ -94,8 +94,8 @@ contract DistributorAdversarialTest is DistributionFixture {
             claim(i);
         }
         assertEq(token.balanceOf(address(drop)), 100_000_000e18 - paid);
-        assertEq(token.balanceOf(treasury), 880_000_000e18);
-        assertEq(token.balanceOf(address(seasons)), 20_000_000e18);
+        assertEq(token.balanceOf(treasury), 870_000_000e18);
+        assertEq(token.balanceOf(address(seasons)), 30_000_000e18);
         assertEq(token.totalSupply(), 1_000_000_000e18);
     }
 

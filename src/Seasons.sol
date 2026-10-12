@@ -14,10 +14,10 @@ import {IPLEA, IGate, ILaureates, IPleaHook} from "./interfaces/IPleaParts.sol";
 /// least 60 points are paid 25/18/14/11/9/7/6/4/3/3 % of the prize pot in IMD, unpaid shares roll
 /// over, and the season's five best pleas are minted as Laureates. The pot is fed by the hook's
 /// 0.25% prize fee. After the last season is closed, whatever is left goes to the buy wall.
-/// @notice PLEA bonus: Seasons holds 2% of the supply, minted to it at launch. Each of the first
-/// four seasons pays 0.5% of the supply (5,000,000 PLEA) to the same top 10 with the same shares;
+/// @notice PLEA bonus: Seasons holds 3% of the supply, minted to it at launch. Each of the first
+/// six seasons pays 0.5% of the supply (5,000,000 PLEA) to the same top 10 with the same shares;
 /// a share nobody qualifies for is burned when the season closes. If the Cabal dies before the
-/// fourth season, `flushToWall` burns the rest. Nobody can withdraw it.
+/// sixth season, `flushToWall` burns the rest. Nobody can withdraw it.
 /// @notice The owner of PLEA does not play: its pleas earn no points, and no prize, bonus or
 /// Laureate goes to it, so the prize fee always leaves the team for good.
 contract Seasons {
@@ -57,8 +57,8 @@ contract Seasons {
     uint256 public constant LAUREATES_PER_SEASON = 5;
     /// @notice After a season ends, time to record late approvals before it can be closed.
     uint256 public constant CLOSE_GRACE = 1 hours;
-    /// @notice The PLEA bonus: 0.5% of the supply for each of the first four seasons (2% in all).
-    uint256 public constant BONUS_SEASONS = 4;
+    /// @notice The PLEA bonus: 0.5% of the supply for each of the first six seasons (3% in all).
+    uint256 public constant BONUS_SEASONS = 6;
     uint256 public constant BONUS_PER_SEASON = 5_000_000e18;
 
     IPLEA public immutable plea;

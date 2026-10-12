@@ -44,7 +44,7 @@ contract BonusGate {
     }
 }
 
-/// @dev Stand-in hook: receives the 88% and any IMD the final flush sends to the wall.
+/// @dev Stand-in hook: receives the 87% and any IMD the final flush sends to the wall.
 contract BonusWall {
     MockIMD public immutable imd;
 
@@ -59,7 +59,7 @@ contract BonusWall {
 
 abstract contract BonusFixture is Test {
     uint256 constant BONUS = 5_000_000e18;
-    uint256 constant BONUS_TOTAL = 20_000_000e18;
+    uint256 constant BONUS_TOTAL = 30_000_000e18;
     uint64 constant T0 = 1_792_162_800;
 
     BonusGate gate;
@@ -111,7 +111,7 @@ contract BonusHandler is Test {
     address[] public actors;
     uint256 public nextId = 1;
     uint256 public donated;
-    uint256 public bonusClosed; // bonus seasons closed (0..4)
+    uint256 public bonusClosed; // bonus seasons closed (0..6)
     bool public flushed;
     uint256 public maxPerWallet;
     uint256 public calls;
@@ -186,13 +186,13 @@ contract BonusHandler is Test {
             address w = t[i].wallet;
             if (w == address(0)) continue;
             uint256 expected;
-            if (season < 4 && t[i].points >= 60 && !(restricted && w == address(gate))) {
+            if (season < 6 && t[i].points >= 60 && !(restricted && w == address(gate))) {
                 expected = BONUS * _bps(i) / 10_000;
             }
             assertEq(plea.balanceOf(w) - before[i], expected, "bonus share");
             paid += expected;
         }
-        if (season < 4) {
+        if (season < 6) {
             ++bonusClosed;
             assertEq(held - plea.balanceOf(address(seasons)), BONUS, "a bonus season spends exactly its bonus");
             assertEq(seasons.bonusBurned() - burned, BONUS - paid, "the unpaid rest is burned");
@@ -316,13 +316,13 @@ contract BonusInvariantTest is BonusFixture {
     /// forge-config: default.invariant.runs = 128
     /// forge-config: default.invariant.depth = 64
     function invariant_openBonusSeasonsStayFunded() public view {
-        uint256 closedBonus = seasons.nextToClose() < 4 ? seasons.nextToClose() : 4;
+        uint256 closedBonus = seasons.nextToClose() < 6 ? seasons.nextToClose() : 6;
         assertEq(closedBonus, handler.bonusClosed());
         if (!handler.flushed()) {
-            assertGe(plea.balanceOf(address(seasons)), (4 - closedBonus) * BONUS);
+            assertGe(plea.balanceOf(address(seasons)), (6 - closedBonus) * BONUS);
         }
-        // A wallet earns at most first place in each of the four bonus seasons.
-        assertLe(handler.maxPerWallet(), 4 * share(0));
+        // A wallet earns at most first place in each of the six bonus seasons.
+        assertLe(handler.maxPerWallet(), 6 * share(0));
     }
 
     /// Once flushed, Seasons holds no PLEA unless someone donated since, and it never reopens.
@@ -368,7 +368,7 @@ contract BonusEdgeTest is BonusFixture {
         }
         assertEq(total, BONUS, "shares sum to the bonus");
         assertEq(seasons.bonusBurned(), 0);
-        assertEq(plea.balanceOf(address(seasons)), 3 * BONUS);
+        assertEq(plea.balanceOf(address(seasons)), 5 * BONUS);
     }
 
     function test_sixtyPointsQualifiesFiftyNineDoesNot() public {
@@ -418,7 +418,7 @@ contract BonusEdgeTest is BonusFixture {
         vm.expectRevert(abi.encodeWithSelector(Seasons.NotReady.selector, 1));
         close();
         assertEq(plea.balanceOf(wallets[0]), share(0));
-        assertEq(plea.balanceOf(address(seasons)), 3 * BONUS);
+        assertEq(plea.balanceOf(address(seasons)), 5 * BONUS);
     }
 
     function test_closeWithinTheGraceHourIsRefused() public {
@@ -458,7 +458,7 @@ contract BonusEdgeTest is BonusFixture {
         skip(1 hours);
         close();
         assertTrue(seasons.finished());
-        assertEq(plea.balanceOf(address(seasons)), 3 * BONUS);
+        assertEq(plea.balanceOf(address(seasons)), 5 * BONUS);
         seasons.flushToWall();
         assertEq(plea.balanceOf(address(seasons)), 0);
         assertEq(seasons.bonusBurned(), BONUS_TOTAL - share(0));
@@ -516,7 +516,7 @@ contract BonusEdgeTest is BonusFixture {
         }
         assertEq(paid + seasons.bonusBurned(), BONUS);
         assertEq(supply - plea.totalSupply(), seasons.bonusBurned());
-        assertEq(plea.balanceOf(address(seasons)), 3 * BONUS);
+        assertEq(plea.balanceOf(address(seasons)), 5 * BONUS);
         // Every payee qualified and is ranked.
         Seasons.Entry[10] memory t = seasons.topOf(0);
         for (uint256 i; i < 10; ++i) {

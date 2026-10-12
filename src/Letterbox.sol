@@ -17,6 +17,8 @@ interface ISeasonsForLetters {
     function topOf(uint256 season) external view returns (Entry[10] memory);
     function seasonFees(uint256 season) external view returns (uint256);
     function rollover() external view returns (uint256);
+    function BONUS_SEASONS() external view returns (uint256);
+    function BONUS_PER_SEASON() external view returns (uint256);
 
     struct Entry {
         address wallet;
@@ -412,7 +414,7 @@ contract Letterbox is ReentrancyGuardTransient {
         (bool live, uint256 key, uint64 endsAt) = seasons.currentSeason();
         if (!live) return "No season is running: the Cabal is dead or trading has not opened.";
         uint256 potNow = seasons.seasonFees(key) + seasons.rollover();
-        uint256 bonus = key < 4 ? 5_000_000e18 : 0;
+        uint256 bonus = key < seasons.BONUS_SEASONS() ? seasons.BONUS_PER_SEASON() : 0;
         out = string.concat(
             "Season ",
             Strings.toString(key + 1),
@@ -420,7 +422,7 @@ contract Letterbox is ReentrancyGuardTransient {
             _clock(endsAt),
             unicode" · pot ",
             _imd(potNow),
-            bonus != 0 ? " + 5,000,000 PLEA" : ""
+            bonus != 0 ? string.concat(" + ", _thousands(bonus / 1e18), " PLEA") : ""
         );
         ISeasonsForLetters.Entry[10] memory t = seasons.topOf(key);
         for (uint256 i; i < 10; ++i) {

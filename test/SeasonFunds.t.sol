@@ -240,14 +240,14 @@ contract SeasonFundsTest is Test {
         assertEq(seasons.seasonFees(1), later);
     }
 
-    // ---------------------------------------------------------------- PLEA bonus (2% of supply)
+    // ---------------------------------------------------------------- PLEA bonus (3% of supply)
 
     uint256 constant BONUS = 5_000_000e18;
 
     function test_bonusIsMintedToSeasonsAndCannotBeWithdrawn() public view {
-        assertEq(plea.balanceOf(address(seasons)), 20_000_000e18);
-        assertEq(plea.balanceOf(address(wall)), 880_000_000e18);
-        assertEq(seasons.BONUS_PER_SEASON() * seasons.BONUS_SEASONS(), 20_000_000e18);
+        assertEq(plea.balanceOf(address(seasons)), 30_000_000e18);
+        assertEq(plea.balanceOf(address(wall)), 870_000_000e18);
+        assertEq(seasons.BONUS_PER_SEASON() * seasons.BONUS_SEASONS(), 30_000_000e18);
     }
 
     function test_bonusPaysTheTopTenAndBurnsTheUnpaidShares() public {
@@ -271,7 +271,7 @@ contract SeasonFundsTest is Test {
         assertEq(plea.balanceOf(carol), 0);
         assertEq(seasons.bonusBurned(), 2_850_000e18);
         assertEq(plea.totalSupply(), supply - 2_850_000e18);
-        assertEq(plea.balanceOf(address(seasons)), 15_000_000e18);
+        assertEq(plea.balanceOf(address(seasons)), 25_000_000e18);
     }
 
     function test_prizePleaStaysGatedWhileTheCabalWatches() public {
@@ -289,27 +289,27 @@ contract SeasonFundsTest is Test {
         skip(1 hours);
         close();
         assertEq(seasons.bonusBurned(), BONUS);
-        assertEq(plea.balanceOf(address(seasons)), 15_000_000e18);
+        assertEq(plea.balanceOf(address(seasons)), 25_000_000e18);
     }
 
-    function test_onlyTheFirstFourSeasonsPayABonus() public {
-        for (uint256 s; s < 5; ++s) {
+    function test_onlyTheFirstSixSeasonsPayABonus() public {
+        for (uint256 s; s < 7; ++s) {
             leader(s, alice, 10 * s + 1);
         }
-        atSeason(5);
+        atSeason(7);
         skip(1 hours);
-        for (uint256 s; s < 4; ++s) {
+        for (uint256 s; s < 6; ++s) {
             close();
         }
-        assertEq(plea.balanceOf(alice), 4 * 1_250_000e18);
+        assertEq(plea.balanceOf(alice), 6 * 1_250_000e18);
         assertEq(plea.balanceOf(address(seasons)), 0);
         uint256 burned = seasons.bonusBurned();
-        close(); // season 5: IMD prizes only
-        assertEq(plea.balanceOf(alice), 4 * 1_250_000e18);
+        close(); // season 7: IMD prizes only
+        assertEq(plea.balanceOf(alice), 6 * 1_250_000e18);
         assertEq(seasons.bonusBurned(), burned);
     }
 
-    function test_deathBeforeTheFourthSeasonBurnsTheRest() public {
+    function test_deathBeforeTheSixthSeasonBurnsTheRest() public {
         leader(0, alice, 1);
         atSeason(1);
         skip(1);
@@ -318,19 +318,19 @@ contract SeasonFundsTest is Test {
         close(); // season 0: alice is paid
         close(); // season 1: ended by the death, nobody qualified
         assertTrue(seasons.finished());
-        assertEq(plea.balanceOf(address(seasons)), 10_000_000e18); // seasons 2 and 3 never ran
+        assertEq(plea.balanceOf(address(seasons)), 20_000_000e18); // seasons 2 to 5 never ran
         uint256 supply = plea.totalSupply();
         seasons.flushToWall();
         assertEq(plea.balanceOf(address(seasons)), 0);
-        assertEq(plea.totalSupply(), supply - 10_000_000e18);
-        assertEq(seasons.bonusBurned(), 3_750_000e18 + 5_000_000e18 + 10_000_000e18);
+        assertEq(plea.totalSupply(), supply - 20_000_000e18);
+        assertEq(seasons.bonusBurned(), 3_750_000e18 + 5_000_000e18 + 20_000_000e18);
         assertEq(plea.balanceOf(alice), 1_250_000e18);
     }
 
     function test_flushBeforeTheEndCannotTouchTheBonus() public {
         vm.expectRevert(Seasons.NotFinished.selector);
         seasons.flushToWall();
-        assertEq(plea.balanceOf(address(seasons)), 20_000_000e18);
+        assertEq(plea.balanceOf(address(seasons)), 30_000_000e18);
     }
 
     function test_failedBonusTransferIsBurnedNotStuck() public {

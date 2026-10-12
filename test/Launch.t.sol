@@ -98,8 +98,8 @@ contract LaunchTest is Test {
         address h = launch.deployHook(salt, code);
         assertEq(uint160(h) & 0x3fff, launch.FLAGS());
         assertEq(plea.hook(), h);
-        assertEq(plea.balanceOf(h), 880_000_000e18);
-        assertEq(plea.balanceOf(address(seasons)), 20_000_000e18);
+        assertEq(plea.balanceOf(h), 870_000_000e18);
+        assertEq(plea.balanceOf(address(seasons)), 30_000_000e18);
         vm.expectRevert(PleaLaunch.HookAlreadyDeployed.selector);
         launch.deployHook(salt, code);
     }

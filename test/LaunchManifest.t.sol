@@ -242,8 +242,8 @@ contract PostLaunchHookTest is ManifestFixture {
         assertEq(p.hook(), h);
         assertEq(p.poolManager(), POOL_MANAGER);
         assertEq(p.totalSupply(), 1_000_000_000e18);
-        assertEq(p.balanceOf(h), 880_000_000e18);
-        assertEq(p.balanceOf(expected[2]), 20_000_000e18);
+        assertEq(p.balanceOf(h), 870_000_000e18);
+        assertEq(p.balanceOf(expected[2]), 30_000_000e18);
         assertEq(p.balanceOf(expected[4]), 100_000_000e18);
         assertEq(PleaHook(h).owner(), owner);
         assertEq(address(PleaHook(h).stacker()), STACKER);
