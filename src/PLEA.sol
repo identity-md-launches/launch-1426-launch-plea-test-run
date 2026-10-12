@@ -47,8 +47,9 @@ contract PLEA is ERC20, Ownable {
         }
     }
 
-    /// @notice Called once by PleaLaunch's constructor inside the launch transaction: records the
-    /// launcher and the system's contracts. Nobody can call it afterwards.
+    /// @notice Records the launcher and system contracts once, from PleaLaunch's constructor.
+    /// @dev Registration also accepts any first caller in PLEA's deployment block for rehearsals.
+    /// The factory must deploy all six contracts atomically to prevent an intervening registration.
     function setLauncher(address gate_, address seasons_, address laureates_, address distributor_) external {
         uint256 flag;
         assembly ("memory-safe") {

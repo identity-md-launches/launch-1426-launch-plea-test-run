@@ -106,6 +106,9 @@ contract PleaHook {
     uint256 private constant T_TRADER = 0x01;
     uint256 private constant T_SPEC_FEE = 0x02;
     uint256 private constant T_BUY = 0x03;
+    /// @dev The pool's sqrt price before the swap in flight: the hourly checkpoint records it, so the
+    /// trade that opens an hour cannot choose the hour's reference price.
+    uint256 private constant T_PRICE_BEFORE = 0x04;
 
     IPoolManager public immutable poolManager;
     address public immutable plea;
@@ -390,7 +393,6 @@ contract PleaHook {
         // Any PLEA dust the rounding left behind is burned: the hook holds no inventory of its own.
         uint256 dust = IERC20(plea).balanceOf(address(this));
         if (dust != 0) IPLEA(plea).burn(dust);
-        if (address(stacker).code.length != 0) imd.approve(address(stacker), type(uint256).max);
         _checkpoint(initPrice);
         emit Seeded(initPrice, initTick, liquidity, deposited);
     }
@@ -444,10 +446,12 @@ contract PleaHook {
         if (!specifiedIsImd && buy) _checkMaxBuy(amount);
         // Exact input: the fee is a share of what reaches the pool (amount - fee), not of the gross input.
         uint256 fee = exactIn ? amount * rate / (BPS + rate) : amount * rate / BPS;
+        uint160 priceBefore = currentSqrtPriceX96();
         assembly ("memory-safe") {
             tstore(T_TRADER, trader)
             tstore(T_SPEC_FEE, fee)
             tstore(T_BUY, buy)
+            tstore(T_PRICE_BEFORE, priceBefore)
         }
         return (IHooks.beforeSwap.selector, toBeforeSwapDelta(int128(int256(fee)), 0), 0);
     }
@@ -467,13 +471,16 @@ contract PleaHook {
         address trader;
         uint256 specFee;
         bool buy;
+        uint160 priceBefore;
         assembly ("memory-safe") {
             trader := tload(T_TRADER)
             specFee := tload(T_SPEC_FEE)
             buy := tload(T_BUY)
+            priceBefore := tload(T_PRICE_BEFORE)
             tstore(T_TRADER, 0)
             tstore(T_SPEC_FEE, 0)
             tstore(T_BUY, 0)
+            tstore(T_PRICE_BEFORE, 0)
         }
         bool exactIn = params.amountSpecified < 0;
         bool specifiedIsZero = exactIn == params.zeroForOne;
@@ -521,7 +528,9 @@ contract PleaHook {
         _applyCap();
         _updateWallGuard(currentTick());
         _observeTick();
-        _checkpoint(currentSqrtPriceX96());
+        // The hour's checkpoint is the price this swap found, not the one it made: the first trade of
+        // an hour cannot set the reference price the gate scores that hour's pleas against.
+        _checkpoint(priceBefore);
 
         _payCashback(trader, cashback);
         return (IHooks.afterSwap.selector, ret);
@@ -634,15 +643,18 @@ contract PleaHook {
 
     /// @dev No gas-dependent path a wallet's estimate could pick: the swap reverts unless it can
     /// afford the credit (checked in `beforeSwap` and again here), and only a credit that reverts
-    /// (e.g. a paused vault) pays plain IMD.
+    /// (e.g. a paused vault) pays plain IMD. The Stacker is approved for the cashback being credited
+    /// and nothing more: the wall reserve the hook holds between rebalances is never within its reach.
     function _payCashback(address trader, uint256 amount) internal {
         if (amount == 0) return;
+        imd.forceApprove(address(stacker), amount);
         _requireGas(creditGas * 64 / 63 + CREDIT_RESERVE);
         totalCashback += amount;
         try stacker.credit{gas: creditGas}(trader, amount) {
             emit CashbackStacked(trader, amount);
             return;
         } catch {}
+        imd.forceApprove(address(stacker), 0);
         (bool ok, bytes memory r) = address(imd).call(abi.encodeCall(IERC20.transfer, (trader, amount)));
         if (ok && (r.length == 0 || abi.decode(r, (bool)))) {
             emit CashbackPaidPlain(trader, amount);
@@ -898,6 +910,11 @@ contract PleaHook {
     /// @dev Moves the wall guard: at once in the safe direction (a lower PLEA price) to any observed
     /// tick, and back toward `refTick` at most WALL_GUARD_TICKS_PER_DAY, paced by wall-clock time with
     /// the sub-tick remainder carried and idle time capped at one day (as POOL4's deployment floor).
+    /// A tick the pool sits at with no active liquidity is where a swap that emptied the pool's IMD
+    /// side stopped (the router's default limit at the tick extreme, or any limit the seller chose
+    /// inside the liquidity-free region below the market band), not a price PLEA traded at: the guard
+    /// ignores it, or the wall would be parked hundreds of thousands of ticks below the market for
+    /// years. A tick inside a band with liquidity was paid for in PLEA and counts.
     function _updateWallGuard(int24 observedTick) internal {
         int24 g = wallGuardTick;
         uint256 elapsed = block.timestamp - lastGuardAt;
@@ -918,8 +935,10 @@ contract PleaHook {
                 guardRemainder = 0;
             }
         }
-        int24 seen = _guardFor(observedTick);
-        if (pleaIsZero ? seen < g : seen > g) g = seen;
+        if (observedTick > minTick && observedTick < maxTick && poolManager.getLiquidity(poolId()) != 0) {
+            int24 seen = _guardFor(observedTick);
+            if (pleaIsZero ? seen < g : seen > g) g = seen;
+        }
         wallGuardTick = g;
     }
 

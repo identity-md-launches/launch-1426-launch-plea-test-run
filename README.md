@@ -30,7 +30,7 @@ Launched through the IMD swarm straight from this repository (`launch.open` with
 |---|---|
 | Supply | 1,000,000,000 PLEA (88% pool liquidity, 2% season bonus prizes, 10% Merkle distributor) |
 | Pool | PLEA/IMD on Uniswap v4 with a fork of POOL4's CappedBurnHook: LP fee 0, the hook is the only LP, liquidity locked forever |
-| Selling | Only through the Cabal's gate while it lives |
+| Selling | Through the Cabal's gate while it lives; owner-allowlisted senders are exempt |
 | Judges | 30-seat oracle panel, quorum 17, score 0–45 |
 | Trade fee | 1.75%, paid inside the swap (0.5% back to the trader as staked IMD) |
 | Seasons | 15 days each, top 10 paid, top 5 pleas minted as NFTs |
@@ -48,7 +48,7 @@ For the first **90 minutes** after trading opens, buys pay an extra launch fee t
 
 ### Pleading to sell
 
-While the Cabal lives, PLEA can leave a wallet only through `CabalGate`.
+While the Cabal lives, ordinary holders send PLEA through `CabalGate`. The owner can permanently exempt any sender with `PLEA.allow(account)`. An exempt sender can transfer to buyers or other trading venues without a plea or this hook's fees and cap trim; direct transfers to this pool's PoolManager and gate remain restricted. This add-only owner power is part of the accepted launch design.
 
 1. **Plead.** Ask to sell up to **2.5M PLEA** (and at most **35%** of your balance), with a plea of **1–280 bytes**, and pay the **0.5 IMD** oracle fee. The gate pays the IdentityMD Intake itself.
 2. **Need.** The contract computes your fact score (0–55, below). Your **need** is `70 − fact score`. If the need is above 45, no plea can pass, so the gate refuses it (`CannotPass`) before you pay.
@@ -66,7 +66,7 @@ While the Cabal lives, PLEA can leave a wallet only through `CabalGate`.
 
 ### The fact score
 
-Computed on chain at submit time (0–55). Prices come from the hook's hourly checkpoints, never the spot price.
+Computed on chain at submit time (0–55). Prices come from the hook's hourly checkpoints, never the spot price. An hour's checkpoint is the price the hour's first trade **found**, not the one it made: no trade in an hour can set the reference price that hour's pleas are scored against (a pump still has to be held through the hour before, since the next hour's checkpoint is the price it left).
 
 | Fact | Points |
 |---|---|
@@ -101,7 +101,7 @@ Every trade pays **1.75%**, settled in the same swap. There are no claims to set
 
 | Share | Goes to |
 |---|---|
-| 0.50% | Cashback to the trader as staked IMD (sIMD), through imd/acc's Stacker |
+| 0.50% | Cashback to the trader as staked IMD (sIMD), through imd/acc's Stacker (approved for exactly that cashback, per credit; the wall reserve the hook holds is never within its reach) |
 | 0.50% | The owner |
 | 0.25% | The season's prize pot (pool liquidity once the Cabal is dead) |
 | 0.25% | Pool liquidity (the IMD buy wall) |
@@ -110,7 +110,7 @@ Every trade pays **1.75%**, settled in the same swap. There are no claims to set
 Beyond fees, the hook keeps the market supplied the way POOL4's CappedBurnHook does: PLEA above an inventory cap is trimmed and **burned**, and recovered IMD is redeployed as an IMD-only **buy wall** below the price (`rebalance()`, anyone).
 
 - **Cap pace.** The cap starts at the seeded inventory and follows buys down, at most `(seeded inventory − 900k floor) ÷ 25` PLEA a day, so it can reach its floor in 25 days. It never falls below what the market actually holds. PLEA sold back above the cap is trimmed: burned, with the matching slice of IMD moved to the wall.
-- **Wall placement guard** (POOL4's deployment floor, mirrored for an IMD bid). The wall is never placed above a guard price that drops at once to any lower price PLEA trades at, and rises toward the market at most 400 ticks (~4%) a day. Lifting the wall to a pumped price would mean holding that price for days.
+- **Wall placement guard** (POOL4's deployment floor, mirrored for an IMD bid). The wall is never placed above a guard price that drops at once to any lower price PLEA trades at, and rises toward the market at most 400 ticks (~4%) a day. Lifting the wall to a pumped price would mean holding that price for days. A sell that empties the pool's IMD side (free trading after the Cabal dies) ends at the seller's price limit, whether the router's default at the tick extreme or any limit chosen inside the liquidity-free region below the market band; the pool has no active liquidity at that tick, it is not a traded price, and the guard ignores it, so the wall is placed against the market once IMD is back, not parked at the extreme for years. A tick inside a band with liquidity was paid for in PLEA and the guard drops to it at once. Until the next buy brings spot back from a drained tick, `rebalance()` reverts rather than placing a wall there.
 
 ---
 
@@ -118,7 +118,7 @@ Beyond fees, the hook keeps the market supplied the way POOL4's CappedBurnHook d
 
 | Contract | Role |
 |---|---|
-| `PLEA` | ERC-20, 1e9 supply. While the Cabal lives, PLEA leaves a wallet only through the gate. |
+| `PLEA` | ERC-20, 1e9 supply. Transfers are gated while the Cabal lives, with system-sender and permanent owner-allowlist exemptions. |
 | `CabalGate` | Pleas, the Intake request and callback, appeals, gated sells and the dead-man. |
 | `Seasons` | Points, leaderboard, `closeSeason` payouts, the final flush to the buy wall. |
 | `Laureates` | ERC-721 for each season's top 5 pleas; display names. |
@@ -136,6 +136,8 @@ Beyond fees, the hook keeps the market supplied the way POOL4's CappedBurnHook d
 ```
 PLEA → CabalGate → Seasons → Laureates → PleaDistributor → PleaLaunch
 ```
+
+The factory must deploy all six atomically. `PLEA.setLauncher` accepts the deployment transaction's transient flag **or** PLEA's deployment block, as required by the launch rehearsal. Until registration, any caller in that block can register first; atomic deployment prevents an intervening transaction. `script/Deploy.s.sol` is for local simulations only: its separate broadcasts expose this window and can also fail if they span blocks.
 
 Then:
 
@@ -162,7 +164,7 @@ Then:
 | `START` | 1792162800 (Fri 2026-10-16 15:00 UTC; the owner may seed earlier) |
 | Cashback credit gas | 1,300,000 (Sepolia's gas schedule) |
 
-This branch keeps the full Intake v2 failure function (explicit checks and the `PleaFailed` event); the six-contract deploy is about 21k gas over Ethereum's 16,777,216 per-transaction cap, which Sepolia does not enforce. `test/fork/ForkTestnet.t.sol` rehearses the whole run on a Sepolia fork against the live Intake v2:
+This branch keeps the full Intake v2 failure function (explicit checks and the `PleaFailed` event). The six-contract manifest rehearsal reports **17,246,276 gas**, a margin of **−469,060** against the 16,777,216 mainnet cap (PleaLaunch embeds PleaHook's creation code, so the hook's revision fixes add to it). This local measurement includes harness overhead and excludes transaction intrinsic gas; it is not a deployment receipt. The Sepolia rehearsal reports the margin without enforcing that cap, as required for this launch. See `ADAPTATION.md` for the audit and measurement details; the deployment service must simulate the actual factory transaction against Sepolia's limits. `test/fork/ForkTestnet.t.sol` rehearses the whole run on a Sepolia fork against the live Intake v2:
 
 ```
 SEPOLIA_RPC_URL=https://ethereum-sepolia-rpc.publicnode.com forge test --match-path 'test/fork/*' -vv

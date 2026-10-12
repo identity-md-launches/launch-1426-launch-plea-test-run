@@ -349,6 +349,12 @@ contract TradingInvariantTest is SepoliaFixture {
         assertEq(plea.balanceOf(address(distributor)), 100_000_000e18);
     }
 
+    /// @dev The Stacker is approved per credit and the credit consumes it (or the approval is reset
+    /// when the credit reverts): between calls the wall reserve is never within its reach.
+    function invariant_stackerHoldsNoStandingAllowanceOnTheHooksImd() public view {
+        assertEq(imd.allowance(address(hook), address(stacker)), 0, "Stacker allowance left standing");
+    }
+
     function invariant_quoteConservationAndFeePaymentsMatchTheirCounters() public view {
         uint256 sum = imd.balanceOf(address(pm)) + imd.balanceOf(address(hook)) + imd.balanceOf(address(seasons))
             + imd.balanceOf(address(stacker)) + imd.balanceOf(OWNER) + imd.balanceOf(keeper);

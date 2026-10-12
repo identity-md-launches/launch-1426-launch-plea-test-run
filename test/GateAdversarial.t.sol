@@ -222,6 +222,35 @@ contract GateAdversarialTest is SepoliaFixture {
         assertTrue(gate.consumed(a.requestId));
     }
 
+    /// @dev Meeting our minimum 17 votes does not meet a larger quorum declared by the signed panel.
+    function testFuzz_signedQuorumMustBeReached(uint16 rawQuorum, bool approved) public {
+        uint256 id = plead(alice, 1e18);
+        bytes32 rid = intakeIdOf(id);
+        uint64 heartbeat = gate.lastVerdictAt();
+        skip(1);
+        OracleAttestation.Attestation memory a = attestation(approved ? 45 : 0, keccak256("signed quorum"));
+        a.quorum = uint16(bound(rawQuorum, 18, 30));
+        a.agreed = a.quorum - 1; // still at least the gate's minimum of 17
+        bytes memory signature = sign(a);
+        vm.prank(address(intake));
+        vm.expectRevert(CabalGate.WrongPanel.selector);
+        gate.onOracleResult(rid, a, signature);
+        assertFalse(gate.consumed(a.requestId));
+        assertEq(gate.pleaOfIntake(rid), id);
+        assertEq(gate.pendingOf(alice), id);
+        assertEq(uint8(gate.getPlea(id).status), uint8(CabalGate.Status.Pending));
+        assertEq(gate.getPlea(id).verdictAt, 0);
+        assertEq(gate.lastVerdictAt(), heartbeat);
+        assertEq(gate.lastDeniedAt(alice), 0);
+
+        // Exactly reaching that same signed quorum is sufficient, within the Intake's stipend.
+        a.agreed = a.quorum;
+        assertTrue(deliver(rid, a));
+        assertTrue(gate.consumed(a.requestId));
+        assertEq(uint8(gate.getPlea(id).status), uint8(approved ? CabalGate.Status.Approved : CabalGate.Status.Denied));
+        assertLt(intake.lastCallbackGasUsed(), 200_000);
+    }
+
     function test_futureIssuanceAndExpiredAttestationsRejectAtExactBoundaries() public {
         uint256 id = plead(alice, 1e18);
         bytes32 rid = intakeIdOf(id);

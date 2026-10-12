@@ -113,6 +113,16 @@ contract BuyRouter {
         return abi.decode(pm.unlock(abi.encode(msg.sender, false, -int256(pleaIn), hookData, uint160(0))), (uint256));
     }
 
+    /// @dev Exact-input sell that stops at the seller's own `sqrtPriceLimitX96`, as a plain v4 router lets it.
+    function sellExactInLimit(uint256 pleaIn, bytes memory hookData, uint160 sqrtPriceLimitX96)
+        external
+        returns (uint256 imdOut)
+    {
+        return abi.decode(
+            pm.unlock(abi.encode(msg.sender, false, -int256(pleaIn), hookData, sqrtPriceLimitX96)), (uint256)
+        );
+    }
+
     /// @dev A router's sweep: moves tokens it ended up holding to `to`.
     function forward(IERC20 token, address to) external {
         token.transfer(to, token.balanceOf(address(this)));
