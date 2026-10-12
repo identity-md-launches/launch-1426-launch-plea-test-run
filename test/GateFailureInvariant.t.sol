@@ -246,11 +246,11 @@ contract GateFailureInvariantTest is Fixture {
         handler.answer(0, 0); // denied
         assertEq(handler.answered(), 1);
         assertGt(handler.lastDenied(users[0]), 0);
-        handler.appeal(0, 5_000);
+        handler.appeal(0, 10_000);
         assertEq(handler.asks(), 3, "the appeal is asked");
         handler.fail(0, 1, bytes32("body_refused"), 0, 0);
         assertEq(handler.failures(), 2);
-        handler.appeal(0, 5_000); // retried after the failure
+        handler.appeal(0, 10_000); // retried after the failure
         assertEq(handler.asks(), 4);
         handler.answer(0, 45);
         assertEq(uint8(gate.getPlea(gate.pendingOf(users[0])).status), uint8(CabalGate.Status.Approved));

@@ -111,8 +111,12 @@ contract TradingHandler is Test {
         }
         uint256 maximum = token.balanceOf(actor) * 15 / 100;
         if (maximum > 2_500_000e18) maximum = 2_500_000e18;
-        if (maximum == 0) return;
-        uint256 amount = bound(raw, 1, maximum);
+        // The gate's minimum: 1% of the balance (or the 2.5M cap when that is less).
+        uint256 minimum = token.balanceOf(actor) / 100;
+        if (minimum > 2_500_000e18) minimum = 2_500_000e18;
+        if (minimum == 0) minimum = 1;
+        if (maximum < minimum) return;
+        uint256 amount = bound(raw, minimum, maximum);
         uint256 need = 70 - gate.factScore(actor, amount);
         uint256 balanceBefore = feeAsset.balanceOf(actor);
         if (need > 45) vm.expectRevert(abi.encodeWithSelector(CabalGate.CannotPass.selector, need));

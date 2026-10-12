@@ -18,10 +18,15 @@ contract SeasonResults {
 
     mapping(uint256 => Result) public result;
     mapping(uint256 => string) public pleaText;
+    mapping(uint256 => uint8) public pleaFlags;
 
     function setResult(uint256 id, address seller, uint8 score, bool approved, uint64 at) external {
         result[id] = Result(seller, score, approved, at);
         pleaText[id] = 'I said "please", used a \\ and kept <half> & more.';
+    }
+
+    function setFlags(uint256 id, uint8 flags) external {
+        pleaFlags[id] = flags;
     }
 
     function die() external {

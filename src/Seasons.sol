@@ -18,6 +18,8 @@ import {IPLEA, IGate, ILaureates, IPleaHook} from "./interfaces/IPleaParts.sol";
 /// four seasons pays 0.5% of the supply (5,000,000 PLEA) to the same top 10 with the same shares;
 /// a share nobody qualifies for is burned when the season closes. If the Cabal dies before the
 /// fourth season, `flushToWall` burns the rest. Nobody can withdraw it.
+/// @notice The owner of PLEA does not play: its pleas earn no points, and no prize, bonus or
+/// Laureate goes to it, so the prize fee always leaves the team for good.
 contract Seasons {
     using SafeERC20 for IERC20;
 
@@ -27,6 +29,7 @@ contract Seasons {
     error NotReady(uint256 season);
     error NotFinished();
     error CallbackNotExpected();
+    error OwnerExcluded();
 
     event Recorded(uint256 indexed pleaId, uint256 indexed season, address indexed wallet, uint8 score, uint16 points);
     event SeasonClosedOut(uint256 indexed season, uint256 pot, uint256 paid);
@@ -160,6 +163,7 @@ contract Seasons {
         (address seller, uint8 score, bool approved, uint64 verdictAt) = gate.result(pleaId);
         if (!approved) revert NotApproved(pleaId);
         if (recorded[pleaId]) revert AlreadyRecorded(pleaId);
+        if (seller == plea.owner()) revert OwnerExcluded();
         uint256 season = _seasonOf(verdictAt);
         if (closed[season]) revert SeasonClosed(season);
         _record(pleaId, season, seller, score);
@@ -265,6 +269,7 @@ contract Seasons {
         _redeemClaims();
         uint256 paid;
         Entry[10] memory t = _top[season];
+        _dropOwner(t);
         for (uint256 i; i < TOP; ++i) {
             if (t[i].wallet == address(0) || t[i].points < MIN_POINTS) continue;
             uint256 amount = amountIn * _shareBps(i) / 10_000;
@@ -281,9 +286,11 @@ contract Seasons {
 
         PleaEntry[5] memory lp = _topPleas[season];
         ILaureates l = ILaureates(plea.laureates());
+        address owner_ = plea.owner();
         for (uint256 i; i < LAUREATES_PER_SEASON; ++i) {
             if (lp[i].pleaId == 0) break;
             (address seller,,,) = gate.result(lp[i].pleaId);
+            if (seller == owner_) continue;
             uint256 tokenId = l.mint(seller, season, uint8(i + 1), lp[i].pleaId);
             emit LaureateMinted(season, lp[i].pleaId, uint8(i + 1), tokenId);
         }
@@ -335,10 +342,19 @@ contract Seasons {
     function _tryRecord(uint256 pleaId) internal {
         if (recorded[pleaId]) return;
         (address seller, uint8 score, bool approved, uint64 verdictAt) = gate.result(pleaId);
-        if (!approved) return;
+        if (!approved || seller == plea.owner()) return;
         uint256 season = _seasonOf(verdictAt);
         if (closed[season]) return;
         _record(pleaId, season, seller, score);
+    }
+
+    /// @dev Points recorded before an ownership transfer: the current owner is not paid. Its rank's
+    /// share is not paid to anyone else either (the IMD rolls over, the PLEA bonus share is burned).
+    function _dropOwner(Entry[10] memory t) internal view {
+        address owner_ = plea.owner();
+        for (uint256 i; i < TOP; ++i) {
+            if (t[i].wallet == owner_ && owner_ != address(0)) t[i].wallet = address(0);
+        }
     }
 
     function _shareBps(uint256 rank) internal pure returns (uint256) {

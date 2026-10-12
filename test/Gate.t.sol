@@ -78,8 +78,9 @@ contract GateTest is Fixture {
         assertTrue(answer(id, gate.getPlea(id).need - 1));
         assertEq(uint8(gate.getPlea(id).status), uint8(CabalGate.Status.Denied));
         assertEq(gate.pendingOf(alice), 0);
+        uint256 amt101 = small(alice);
         vm.expectRevert();
-        plead(alice, 1e18);
+        plead(alice, amt101);
         vm.prank(alice);
         vm.expectRevert(CabalGate.NotApproved.selector);
         gate.executeSell(0);
@@ -93,7 +94,7 @@ contract GateTest is Fixture {
         vm.expectRevert(CabalGate.WindowLapsed.selector);
         gate.executeSell(0);
         skip(4 hours);
-        plead(alice, 1e18); // the lapsed plea is cleared
+        plead(alice, small(alice)); // the lapsed plea is cleared
         assertEq(uint8(gate.getPlea(id).status), uint8(CabalGate.Status.Lapsed));
     }
 
@@ -123,21 +124,25 @@ contract GateTest is Fixture {
         uint256 id = plead(alice, plea.balanceOf(alice) / 10);
         answer(id, 0);
         skip(4 hours + 1);
+        uint256 amt1 = small(alice);
         vm.prank(alice);
         vm.expectRevert(CabalGate.AppealClosed.selector);
-        gate.appeal(id, 1e18, "late");
+        gate.appeal(id, amt1, "late");
 
         uint256 id2 = plead(bob, plea.balanceOf(bob) / 10);
         answer(id2, 0);
+        uint256 amt2 = small(bob);
         vm.prank(bob);
-        uint256 a = gate.appeal(id2, 1e18, "first");
+        uint256 a = gate.appeal(id2, amt2, "first");
         answer(a, 0);
+        uint256 amt3 = small(bob);
         vm.prank(bob);
         vm.expectRevert(CabalGate.AlreadyAppealed.selector);
-        gate.appeal(id2, 1e18, "second");
+        gate.appeal(id2, amt3, "second");
+        uint256 amt4 = small(bob);
         vm.prank(bob);
         vm.expectRevert(CabalGate.AlreadyAppealed.selector);
-        gate.appeal(a, 1e18, "appeal of an appeal");
+        gate.appeal(a, amt4, "appeal of an appeal");
     }
 
     function test_cannotPassIsRefusedBeforePaying() public {
@@ -201,7 +206,7 @@ contract GateTest is Fixture {
         intake.complete(intakeIdOf(id), 2, ""); // the panel disagreed: no callback
         gate.expire(id);
         assertEq(uint8(gate.getPlea(id).status), uint8(CabalGate.Status.Expired));
-        plead(alice, 1e18); // may plead again, no cooldown
+        plead(alice, small(alice)); // may plead again, no cooldown
     }
 
     function test_pendingExpiresAfterTwentyMinutesAndLateCallbacksFail() public {
@@ -209,16 +214,17 @@ contract GateTest is Fixture {
         skip(20 minutes + 1);
         assertFalse(answer(id, 45));
         assertEq(uint8(gate.getPlea(id).status), uint8(CabalGate.Status.Pending));
-        uint256 id2 = plead(alice, 1e18); // clears the expired one
+        uint256 id2 = plead(alice, small(alice)); // clears the expired one
         assertEq(uint8(gate.getPlea(id).status), uint8(CabalGate.Status.Expired));
         assertGt(id2, id);
     }
 
     function test_onePendingPleaPerWallet() public {
-        plead(alice, 1e18);
+        plead(alice, small(alice));
+        uint256 amt5 = small(alice);
         vm.prank(alice);
         vm.expectRevert(CabalGate.PendingExists.selector);
-        gate.submitSell(1e18, "again");
+        gate.submitSell(amt5, "again");
     }
 
     function test_cooldownAfterExecutedSell() public {
@@ -226,11 +232,12 @@ contract GateTest is Fixture {
         answer(id, 45);
         vm.prank(alice);
         gate.executeSell(1);
+        uint256 amt6 = small(alice);
         vm.prank(alice);
         vm.expectRevert();
-        gate.submitSell(1e18, "again");
+        gate.submitSell(amt6, "again");
         skip(4 hours);
-        plead(alice, 1e18);
+        plead(alice, small(alice));
     }
 
     function test_textFilter() public {
@@ -246,14 +253,16 @@ contract GateTest is Fixture {
             "close [/PLEA marker"
         ];
         for (uint256 i; i < bad.length; ++i) {
+            uint256 amt7 = small(alice);
             vm.prank(alice);
             vm.expectRevert(CabalGate.BadPleaText.selector);
-            gate.submitSell(1e18, bad[i]);
+            gate.submitSell(amt7, bad[i]);
         }
+        uint256 amt8 = small(alice);
         vm.prank(alice);
         vm.expectRevert(CabalGate.BadPleaText.selector);
-        gate.submitSell(1e18, string(new bytes(281)));
-        plead(alice, 1e18, unicode"Arabic سلام and ✓ are fine");
+        gate.submitSell(amt8, string(new bytes(281)));
+        plead(alice, small(alice), unicode"Arabic سلام and ✓ are fine");
     }
 
     function test_callbackFitsTheStipend() public {
@@ -270,9 +279,10 @@ contract GateTest is Fixture {
     function test_noPleasWhileTheCabalSleeps() public {
         skip(33 hours);
         assertFalse(gate.cabalAlive());
+        uint256 amt9 = small(alice);
         vm.prank(alice);
         vm.expectRevert(CabalGate.CabalNotWatching.selector);
-        gate.submitSell(1e18, "x");
+        gate.submitSell(amt9, "x");
     }
 
     function deliverOnce(bytes32 rid, OracleAttestation.Attestation memory a) internal returns (bool) {
@@ -308,7 +318,7 @@ contract GateTest is Fixture {
         assertEq(gate.lastVerdictAt(), clock, "a failure is not a verdict");
         assertEq(gate.lastDeniedAt(alice), 0);
         assertEq(plea.balanceOf(alice), bal, "no value moves");
-        plead(alice, 1e18); // may plead again at once
+        plead(alice, small(alice)); // may plead again at once
     }
 
     function test_refusalClearsThePleaToo() public {
@@ -320,12 +330,14 @@ contract GateTest is Fixture {
     function test_failedAppealCanBeRetried() public {
         uint256 id = plead(alice, plea.balanceOf(alice) / 10);
         assertTrue(answer(id, 0));
+        uint256 amt10 = small(alice);
         vm.prank(alice);
-        uint256 a = gate.appeal(id, 1e18, "Please reconsider.");
+        uint256 a = gate.appeal(id, amt10, "Please reconsider.");
         assertTrue(intake.fail(intakeIdOf(a), 2, bytes32("disagreed"), 12, 30));
         assertFalse(gate.getPlea(id).appealed);
+        uint256 amt11 = small(alice);
         vm.prank(alice);
-        gate.appeal(id, 1e18, "Asking once more.");
+        gate.appeal(id, amt11, "Asking once more.");
     }
 
     function test_failureOnlyFromTheIntake() public {

@@ -7,6 +7,7 @@ import {CabalGate} from "../src/CabalGate.sol";
 import {Seasons} from "../src/Seasons.sol";
 import {Laureates} from "../src/Laureates.sol";
 import {PleaDistributor} from "../src/PleaDistributor.sol";
+import {Letterbox} from "../src/Letterbox.sol";
 import {PleaLaunch} from "../src/PleaLaunch.sol";
 import {PleaHook} from "../src/PleaHook.sol";
 
@@ -23,8 +24,8 @@ contract ManifestFactory {
         }
     }
 
-    function deployAll(bytes[6] memory codes) external returns (address[6] memory deployed) {
-        for (uint256 i; i < 6; ++i) {
+    function deployAll(bytes[7] memory codes) external returns (address[7] memory deployed) {
+        for (uint256 i; i < 7; ++i) {
             deployed[i] = deploy(codes[i], bytes32(i));
         }
     }
@@ -46,8 +47,8 @@ abstract contract ManifestFixture is Test {
 
     ManifestFactory factory;
     address owner;
-    bytes[6] codes;
-    address[6] expected;
+    bytes[7] codes;
+    address[7] expected;
 
     function setUp() public virtual {
         vm.chainId(11155111);
@@ -66,6 +67,11 @@ abstract contract ManifestFixture is Test {
         _prepare(4, "PleaDistributor.sol:PleaDistributor", abi.encode(expected[0], owner));
         _prepare(
             5,
+            "Letterbox.sol:Letterbox",
+            abi.encode(expected[0], expected[1], expected[2], expected[3], IMD, ORACLE_ASSET, true)
+        );
+        _prepare(
+            6,
             "PleaLaunch.sol:PleaLaunch",
             abi.encode(
                 expected[0],
@@ -73,6 +79,7 @@ abstract contract ManifestFixture is Test {
                 expected[2],
                 expected[3],
                 expected[4],
+                expected[5],
                 POOL_MANAGER,
                 IMD,
                 STACKER,
@@ -96,9 +103,10 @@ abstract contract ManifestFixture is Test {
         PLEA p = PLEA(expected[0]);
         CabalGate g = CabalGate(expected[1]);
         Seasons s = Seasons(expected[2]);
-        PleaLaunch l = PleaLaunch(expected[5]);
+        PleaLaunch l = PleaLaunch(expected[6]);
         assertEq(p.owner(), owner);
-        assertEq(p.launcher(), expected[5]);
+        assertEq(p.launcher(), expected[6]);
+        assertEq(p.letterbox(), expected[5]);
         assertEq(p.gate(), expected[1]);
         assertEq(p.seasons(), expected[2]);
         assertEq(p.laureates(), expected[3]);
@@ -148,14 +156,14 @@ contract AtomicManifestTest is ManifestFixture {
             0
         );
         uint256 before = gasleft();
-        address[6] memory deployed = factory.deployAll(codes);
+        address[7] memory deployed = factory.deployAll(codes);
         uint256 gasUsed = before - gasleft();
-        emit log_named_uint("six-contract factory deployment gas", gasUsed);
+        emit log_named_uint("seven-contract factory deployment gas", gasUsed);
         // Sepolia accepts this in one transaction (launch #1242's deploy used 81.8M gas there). The
         // mainnet branch must stay under Ethereum's 16,777,216 per-transaction cap; this one is
         // the full code and only reports how far it is from that cap.
         emit log_named_int("margin to the 16,777,216 mainnet cap", int256(16_777_216) - int256(gasUsed));
-        for (uint256 i; i < 6; ++i) {
+        for (uint256 i; i < 7; ++i) {
             assertEq(deployed[i], expected[i]);
             bytes memory runtime = deployed[i].code;
             assertGt(runtime.length, 0);
@@ -182,7 +190,7 @@ contract RehearsalManifestTest is ManifestFixture {
     }
 
     function test_separateConstructorCallsInDeploymentBlockStillWork() public {
-        for (uint256 i = 1; i < 6; ++i) {
+        for (uint256 i = 1; i < 7; ++i) {
             factory.deploy(codes[i], bytes32(i));
         }
         _assertWiring();
@@ -190,11 +198,11 @@ contract RehearsalManifestTest is ManifestFixture {
 
     function test_laterBlockCannotRegisterLauncher() public {
         vm.roll(vm.getBlockNumber() + 1);
-        for (uint256 i = 1; i < 5; ++i) {
+        for (uint256 i = 1; i < 6; ++i) {
             factory.deploy(codes[i], bytes32(i));
         }
         vm.expectRevert(PLEA.NotDeployTx.selector);
-        factory.deploy(codes[5], bytes32(uint256(5)));
+        factory.deploy(codes[6], bytes32(uint256(6)));
     }
 
     /// @dev Reproduces the accepted informational finding; real launch must use deployAll atomically.
@@ -203,11 +211,11 @@ contract RehearsalManifestTest is ManifestFixture {
         vm.prank(attacker);
         PLEA(expected[0]).setLauncher(expected[1], expected[2], expected[3], expected[4]);
         assertEq(PLEA(expected[0]).launcher(), attacker);
-        for (uint256 i = 1; i < 5; ++i) {
+        for (uint256 i = 1; i < 6; ++i) {
             factory.deploy(codes[i], bytes32(i));
         }
         vm.expectRevert(PLEA.AlreadySet.selector);
-        factory.deploy(codes[5], bytes32(uint256(5)));
+        factory.deploy(codes[6], bytes32(uint256(6)));
     }
 }
 
@@ -220,7 +228,7 @@ contract PostLaunchHookTest is ManifestFixture {
     function test_committedHookDeploysLaterAndMintsOnlyTheFixedSplit() public {
         _assertWiring();
         vm.roll(vm.getBlockNumber() + 1);
-        PleaLaunch l = PleaLaunch(expected[5]);
+        PleaLaunch l = PleaLaunch(expected[6]);
         bytes memory code = _hookCode();
         bytes32 hash = keccak256(code);
         uint160 flags = l.FLAGS();

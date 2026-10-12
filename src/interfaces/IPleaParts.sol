@@ -40,6 +40,8 @@ interface IPLEA {
     function seasons() external view returns (address);
     function laureates() external view returns (address);
     function poolManager() external view returns (address);
+    function letterbox() external view returns (address);
+    function courtTake(address from, uint256 amount) external;
     function restricted() external view returns (bool);
     function balanceOf(address) external view returns (uint256);
     function burn(uint256 amount) external;
@@ -54,6 +56,7 @@ interface IGate {
     function begin() external;
     function result(uint256 id) external view returns (address seller, uint8 score, bool approved, uint64 verdictAt);
     function pleaText(uint256 id) external view returns (string memory);
+    function pleaFlags(uint256 id) external view returns (uint8);
 }
 
 interface IPleaHook {

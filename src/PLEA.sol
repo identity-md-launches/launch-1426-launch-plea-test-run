@@ -16,10 +16,12 @@ contract PLEA is ERC20, Ownable {
     error AlreadySet();
     error NotLauncher();
     error ZeroAddress();
+    error NotLetterbox();
 
     event Launched(address indexed launcher, address gate, address seasons, address laureates, address distributor);
     event Initialized(address indexed hook);
     event Allowed(address indexed account);
+    event LetterboxSet(address indexed letterbox);
 
     uint256 public constant TOTAL_SUPPLY = 1_000_000_000e18;
     // keccak256("plea.deploy-tx") - 1
@@ -36,6 +38,9 @@ contract PLEA is ERC20, Ownable {
     address public distributor;
     address public hook;
     address public poolManager;
+    /// @notice The court's Letterbox: holds plea escrows and tips for pleas sent by letter (or with
+    /// the site's auto-sell). It may move a wallet's PLEA only inside that wallet's own transaction.
+    address public letterbox;
 
     /// @notice Add-only allowlist of senders exempt from the Cabal's transfer rule.
     mapping(address => bool) public allowed;
@@ -69,6 +74,24 @@ contract PLEA is ERC20, Ownable {
         laureates = laureates_;
         distributor = distributor_;
         emit Launched(msg.sender, gate_, seasons_, laureates_, distributor_);
+    }
+
+    /// @notice Records the Letterbox once, from PleaLaunch's constructor (right after `setLauncher`).
+    function setLetterbox(address letterbox_) external {
+        if (msg.sender != launcher) revert NotLauncher();
+        if (letterbox != address(0)) revert AlreadySet();
+        if (letterbox_ == address(0)) revert ZeroAddress();
+        letterbox = letterbox_;
+        emit LetterboxSet(letterbox_);
+    }
+
+    /// @notice The court's entry point: the Letterbox moves `amount` from `from` into escrow, without
+    /// an allowance. The Letterbox only ever passes its own caller as `from`, so a wallet's PLEA
+    /// moves only inside a letter or site transaction that wallet sent itself.
+    function courtTake(address from, uint256 amount) external {
+        address lb = letterbox;
+        if (lb == address(0) || msg.sender != lb) revert NotLetterbox();
+        _transfer(from, lb, amount);
     }
 
     /// @notice Records the hook and mints the supply: 88% to the hook, 2% to Seasons (the PLEA
@@ -111,13 +134,18 @@ contract PLEA is ERC20, Ownable {
             } else if (to == gate) {
                 // Only the gate pulls PLEA (transferFrom in executeSell); direct sends are refused.
                 if (msg.sender != gate) revert CabalIsWatching();
-            } else if (
-                from != poolManager && from != hook && from != gate && from != distributor && from != seasons
-                    && !allowed[from]
-            ) {
+            } else if (!_exempt(from) && !(to == letterbox && msg.sender == to && to != address(0))) {
+                // Escrow into the Letterbox only through `courtTake`; direct sends are refused.
                 revert CabalIsWatching();
             }
         }
         super._update(from, to, value);
+    }
+
+    /// @dev Senders that move PLEA freely while the Cabal watches: the pool and the court's own
+    /// contracts (the Letterbox returns escrows and pays them into sales), and the owner's allowlist.
+    function _exempt(address from) internal view returns (bool) {
+        return from == poolManager || from == hook || from == gate || from == distributor || from == seasons
+            || (from == letterbox && from != address(0)) || allowed[from];
     }
 }

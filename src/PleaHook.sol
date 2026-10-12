@@ -833,8 +833,10 @@ contract PleaHook {
         retainedImd += amount;
     }
 
+    /// @dev The owner gets no tip: the wall's IMD never comes back to the team.
     function _payTip(address keeper, uint256 work) internal {
         uint256 tip = KEEPER_TIP;
+        if (keeper == owner) return;
         if (work < TIP_MIN_WORK || block.timestamp < lastTipAt + TIP_INTERVAL || retainedImd < tip) return;
         lastTipAt = block.timestamp;
         retainedImd -= tip;

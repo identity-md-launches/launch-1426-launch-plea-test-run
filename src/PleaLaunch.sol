@@ -10,6 +10,7 @@ import {IGate, IPleaHook} from "./interfaces/IPleaParts.sol";
 interface IPLEAForLaunch {
     function owner() external view returns (address);
     function setLauncher(address gate, address seasons, address laureates, address distributor) external;
+    function setLetterbox(address letterbox) external;
     function init(address hook, address poolManager) external;
 }
 
@@ -52,6 +53,7 @@ contract PleaLaunch {
         address seasons_,
         address laureates_,
         address distributor_,
+        address letterbox_,
         address poolManager_,
         address imd_,
         address stacker_,
@@ -71,6 +73,7 @@ contract PleaLaunch {
             )
         );
         IPLEAForLaunch(plea_).setLauncher(gate_, seasons_, laureates_, distributor_);
+        IPLEAForLaunch(plea_).setLetterbox(letterbox_);
     }
 
     /// @notice Deploys PleaHook with CREATE2 at a flagged address and lets PLEA mint the supply.

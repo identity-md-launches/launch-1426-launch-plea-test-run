@@ -8,6 +8,7 @@ import {CabalGate} from "../../src/CabalGate.sol";
 import {Seasons} from "../../src/Seasons.sol";
 import {Laureates} from "../../src/Laureates.sol";
 import {PleaDistributor} from "../../src/PleaDistributor.sol";
+import {Letterbox} from "../../src/Letterbox.sol";
 import {PleaLaunch} from "../../src/PleaLaunch.sol";
 import {PleaHook} from "../../src/PleaHook.sol";
 import {OracleAttestation} from "../../src/OracleAttestation.sol";
@@ -71,6 +72,7 @@ contract ForkTestnetTest is Test {
     CabalGate gate;
     Seasons seasons;
     Laureates laureates;
+    Letterbox letterbox;
     PleaLaunch launch;
     PleaHook hook;
     address owner = makeAddr("owner");
@@ -110,12 +112,16 @@ contract ForkTestnetTest is Test {
         seasons = new Seasons(address(plea), address(gate), address(IMD));
         laureates = new Laureates(address(plea));
         PleaDistributor distributor = new PleaDistributor(address(plea), owner);
+        letterbox = new Letterbox(
+            address(plea), address(gate), address(seasons), address(laureates), address(IMD), ORACLE_IMD, true
+        );
         launch = new PleaLaunch(
             address(plea),
             address(gate),
             address(seasons),
             address(laureates),
             address(distributor),
+            address(letterbox),
             POOL_MANAGER,
             address(IMD),
             STACKER,

@@ -8,6 +8,7 @@ import {CabalGate} from "../src/CabalGate.sol";
 import {Seasons} from "../src/Seasons.sol";
 import {Laureates} from "../src/Laureates.sol";
 import {PleaDistributor} from "../src/PleaDistributor.sol";
+import {Letterbox} from "../src/Letterbox.sol";
 import {PleaLaunch} from "../src/PleaLaunch.sol";
 import {PleaHook} from "../src/PleaHook.sol";
 import {MockIMD, MockIntake} from "./utils/Mocks.sol";
@@ -40,12 +41,16 @@ contract LaunchTest is Test {
         seasons = new Seasons(address(plea), address(gate), address(imd));
         Laureates l = new Laureates(address(plea));
         PleaDistributor d = new PleaDistributor(address(plea), OWNER);
+        Letterbox lb = new Letterbox(
+            address(plea), address(gate), address(seasons), address(l), address(imd), address(imd), false
+        );
         launch = new PleaLaunch(
             address(plea),
             address(gate),
             address(seasons),
             address(l),
             address(d),
+            address(lb),
             poolManager,
             address(imd),
             stacker,

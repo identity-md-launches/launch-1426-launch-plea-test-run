@@ -10,6 +10,7 @@ import {CabalGate} from "../../src/CabalGate.sol";
 import {Seasons} from "../../src/Seasons.sol";
 import {Laureates} from "../../src/Laureates.sol";
 import {PleaDistributor} from "../../src/PleaDistributor.sol";
+import {Letterbox} from "../../src/Letterbox.sol";
 import {PleaLaunch} from "../../src/PleaLaunch.sol";
 import {PleaHook} from "../../src/PleaHook.sol";
 import {MockIMD, MockSIMD, MockStacker, BuyRouter, MockIntake} from "./Mocks.sol";
@@ -38,6 +39,7 @@ contract Fixture is Test {
     Seasons seasons;
     Laureates laureates;
     PleaDistributor distributor;
+    Letterbox letterbox;
     PleaLaunch launch;
     PleaHook hook;
     BuyRouter router;
@@ -107,12 +109,16 @@ contract Fixture is Test {
         seasons = new Seasons(address(plea), address(gate), address(imd));
         laureates = new Laureates(address(plea));
         distributor = new PleaDistributor(address(plea), OWNER);
+        letterbox = new Letterbox(
+            address(plea), address(gate), address(seasons), address(laureates), address(imd), address(oimd), true
+        );
         launch = new PleaLaunch(
             address(plea),
             address(gate),
             address(seasons),
             address(laureates),
             address(distributor),
+            address(letterbox),
             address(pm),
             address(imd),
             address(stacker),
@@ -160,6 +166,12 @@ contract Fixture is Test {
     function plead(address who, uint256 amount, string memory text) internal returns (uint256 id) {
         vm.prank(who);
         id = gate.submitSell(amount, text);
+    }
+
+    /// @dev A valid small plea: 2% of the balance (the gate's minimum is 1%), at most 2.5M PLEA.
+    function small(address who) internal view returns (uint256 amount) {
+        amount = plea.balanceOf(who) / 50;
+        if (amount > 2_500_000e18) amount = 2_500_000e18;
     }
 
     function intakeIdOf(uint256 id) internal view returns (bytes32) {

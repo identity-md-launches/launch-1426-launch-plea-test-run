@@ -45,6 +45,8 @@ contract CabalGate is OracleAttestationConsumer {
         Status status;
         bool appealed;
         bool isAppeal;
+        /// @dev FLAG_BY_LETTER | FLAG_AUTO_SELL; zero for a site plea the seller sells by hand.
+        uint8 flags;
         uint128 amount;
         uint64 submittedAt;
         uint64 verdictAt;
@@ -80,6 +82,11 @@ contract CabalGate is OracleAttestationConsumer {
     error PartialFill(uint256 sold, uint256 amount);
     error NotPoolManager();
     error CallbackNotExpected();
+    error AmountTooSmall();
+    error NotLetterbox();
+    error UseLetterbox();
+    error BadFlags();
+    error FeeTooHigh(uint256 pleaIn, uint256 maxPleaIn);
 
     event CabalBegins(uint64 at);
     event PleaSubmitted(
@@ -98,6 +105,8 @@ contract CabalGate is OracleAttestationConsumer {
     /// @notice The Intake reported no verdict for the plea (status 1 refused, 2 no answer). The
     /// reason and counts are the Intake writer's word (unsigned); the plea was only cleared.
     event PleaFailed(uint256 indexed id, uint8 status, bytes32 reason, uint16 agreed, uint16 answered);
+    /// @notice The plea came through the Letterbox: by letter (bit 1) and/or selling itself (bit 2).
+    event PleaFlags(uint256 indexed id, uint8 flags);
 
     // ---------------------------------------------------------------- agreed numbers
     uint256 public constant ORACLE_FEE = 0.5e18;
@@ -108,6 +117,10 @@ contract CabalGate is OracleAttestationConsumer {
     uint256 public constant MAX_PLEA_BYTES = 280;
     uint256 public constant MAX_SELL = 2_500_000e18;
     uint256 public constant MAX_SHARE_BPS = 3_500;
+    /// @notice A plea is at least 1% of the seller's PLEA, so points always put real PLEA on the line.
+    uint256 public constant MIN_SHARE_BPS = 100;
+    uint8 public constant FLAG_BY_LETTER = 1;
+    uint8 public constant FLAG_AUTO_SELL = 2;
     uint256 public constant PASS_MARK = 70;
     uint256 public constant MAX_PLEA_SCORE = 45;
     uint16 public constant PANEL_SIZE = 30;
@@ -145,6 +158,8 @@ contract CabalGate is OracleAttestationConsumer {
     mapping(address => uint256) public lastExecutedAt;
     mapping(address => uint256) public lastDeniedAt;
     mapping(address => uint256) public lastLapsedAt;
+    /// @notice Each seller's newest plea or appeal (what a letter's APPEAL refers to).
+    mapping(address => uint256) public lastPleaOf;
     bool private callbackExpected;
 
     constructor(
@@ -205,6 +220,10 @@ contract CabalGate is OracleAttestationConsumer {
         return pleas[id].text;
     }
 
+    function pleaFlags(uint256 id) external view returns (uint8) {
+        return pleas[id].flags;
+    }
+
     /// @notice What Seasons reads: whether the plea's verdict was an approval, and its score.
     function result(uint256 id) external view returns (address seller, uint8 score, bool approved, uint64 verdictAt) {
         Plea storage p = pleas[id];
@@ -220,7 +239,12 @@ contract CabalGate is OracleAttestationConsumer {
     /// @notice The on-chain fact score (0-55) for `seller` selling `amount` now. Prices are the
     /// hook's hourly checkpoints, never the spot price, and the holding time is buy-weighted.
     function factScore(address seller, uint256 amount) public view returns (uint8 score) {
-        uint256 bal = plea.balanceOf(seller);
+        return _factScore(seller, amount, plea.balanceOf(seller));
+    }
+
+    /// @dev `bal` is the seller's balance before anything moved in this transaction (a letter
+    /// escrows the plea first, so the Letterbox passes the balance it read before).
+    function _factScore(address seller, uint256 amount, uint256 bal) internal view returns (uint8 score) {
         if (bal == 0) return 0;
         uint256 shareBps = amount * 10_000 / bal;
         if (shareBps <= 1_500) score += 18;
@@ -258,9 +282,34 @@ contract CabalGate is OracleAttestationConsumer {
     /// @notice Plead to sell `amount` PLEA. Pays 0.5 oracle IMD to the Intake.
     function submitSell(uint256 amount, string calldata text) external returns (uint256 id) {
         _requireCanPlead(msg.sender);
-        _checkAmount(msg.sender, amount);
+        uint256 bal = plea.balanceOf(msg.sender);
+        _checkAmount(amount, bal);
         _validateText(text);
-        id = _open(msg.sender, amount, text, 0);
+        id = _open(msg.sender, amount, text, 0, bal);
+        _ask(id);
+    }
+
+    /// @notice The Letterbox pleads for `seller` (who sent the letter or the site's auto-sell plea in
+    /// this very transaction): same rules as `submitSell`, scored on `balance`, the seller's PLEA
+    /// before the Letterbox escrowed the plea. The fees come from the seller's PLEA: the gate sells
+    /// at most `maxFeePlea` of the Letterbox's PLEA for exactly `feeImd` IMD (to the Letterbox),
+    /// then the Letterbox pays the oracle fee.
+    function submitFor(
+        address seller,
+        uint256 amount,
+        uint256 balance,
+        string calldata text,
+        uint8 flags,
+        uint256 feeImd,
+        uint256 maxFeePlea
+    ) external returns (uint256 id, uint256 feePlea) {
+        _onlyLetterbox(flags);
+        _requireCanPlead(seller);
+        _checkAmount(amount, balance);
+        _validateText(text);
+        id = _open(seller, amount, text, 0, balance);
+        _flag(id, flags);
+        feePlea = _swapFee(seller, feeImd, maxFeePlea);
         _ask(id);
     }
 
@@ -268,21 +317,51 @@ contract CabalGate is OracleAttestationConsumer {
     /// the original: 0.5 oracle IMD plus 0.35 pool IMD to the buy wall. An unanswered, expired
     /// appeal may be retried within that same window, paying the fees again.
     function appeal(uint256 originalId, uint256 amount, string calldata text) external returns (uint256 id) {
+        id = _appeal(msg.sender, originalId, amount, plea.balanceOf(msg.sender), text);
+        _payAppeal(id);
+    }
+
+    /// @notice The Letterbox appeals `originalId` for its seller, for the original amount; the fees
+    /// (oracle, wall share) come from the seller's PLEA as in `submitFor`.
+    function appealFor(
+        address seller,
+        uint256 originalId,
+        uint256 balance,
+        string calldata text,
+        uint8 flags,
+        uint256 feeImd,
+        uint256 maxFeePlea
+    ) external returns (uint256 id, uint256 feePlea) {
+        _onlyLetterbox(flags);
+        id = _appeal(seller, originalId, pleas[originalId].amount, balance, text);
+        _flag(id, flags);
+        feePlea = _swapFee(seller, feeImd, maxFeePlea);
+        _payAppeal(id);
+    }
+
+    function _appeal(address seller, uint256 originalId, uint256 amount, uint256 bal, string calldata text)
+        internal
+        returns (uint256 id)
+    {
         Plea storage o = pleas[originalId];
-        if (o.seller != msg.sender) revert NotSeller();
+        if (o.seller != seller) revert NotSeller();
         if (o.status != Status.Denied) revert NotDenied();
         if (o.isAppeal) revert AlreadyAppealed();
         if (block.timestamp > uint256(o.verdictAt) + COOLDOWN) revert AppealClosed();
         if (!cabalAlive()) revert CabalNotWatching();
-        _clearStale(msg.sender);
+        _clearStale(seller);
         if (o.appealed) revert AlreadyAppealed();
-        if (pendingOf[msg.sender] != 0) revert PendingExists();
+        if (pendingOf[seller] != 0) revert PendingExists();
         if (amount > o.amount) revert AmountTooLarge();
-        _checkAmount(msg.sender, amount);
+        _checkAmount(amount, bal);
         _validateText(text);
         o.appealed = true;
-        id = _open(msg.sender, amount, text, originalId);
+        id = _open(seller, amount, text, originalId, bal);
         pleas[id].isAppeal = true;
+    }
+
+    /// @dev The appeal's wall share (0.35 IMD, from the caller) and the oracle question.
+    function _payAppeal(uint256 id) internal {
         imd.safeTransferFrom(msg.sender, address(this), APPEAL_POOL_SHARE);
         IPleaHook h = hook();
         imd.forceApprove(address(h), APPEAL_POOL_SHARE);
@@ -290,11 +369,22 @@ contract CabalGate is OracleAttestationConsumer {
         _ask(id);
     }
 
-    function _open(address seller, uint256 amount, string calldata text, uint256 originalId)
+    function _onlyLetterbox(uint8 flags) internal view {
+        address lb = plea.letterbox();
+        if (lb == address(0) || msg.sender != lb) revert NotLetterbox();
+        if ((flags & FLAG_AUTO_SELL) == 0 || flags > (FLAG_BY_LETTER | FLAG_AUTO_SELL)) revert BadFlags();
+    }
+
+    function _flag(uint256 id, uint8 flags) internal {
+        pleas[id].flags = flags;
+        emit PleaFlags(id, flags);
+    }
+
+    function _open(address seller, uint256 amount, string calldata text, uint256 originalId, uint256 bal)
         internal
         returns (uint256 id)
     {
-        uint8 f = factScore(seller, amount);
+        uint8 f = _factScore(seller, amount, bal);
         uint256 need = PASS_MARK - f;
         if (need > MAX_PLEA_SCORE) revert CannotPass(need);
         id = nextId++;
@@ -308,6 +398,7 @@ contract CabalGate is OracleAttestationConsumer {
         p.submittedAt = uint64(block.timestamp);
         p.text = text;
         pendingOf[seller] = id;
+        lastPleaOf[seller] = id;
     }
 
     /// @dev Pays the Intake from the seller's oracle IMD and records the request. The answer comes
@@ -380,9 +471,13 @@ contract CabalGate is OracleAttestationConsumer {
         _expire(id, p);
     }
 
-    function _checkAmount(address seller, uint256 amount) internal view {
-        uint256 bal = plea.balanceOf(seller);
-        if (amount == 0 || amount > MAX_SELL || amount > bal * MAX_SHARE_BPS / 10_000) revert AmountTooLarge();
+    /// @dev At most 35% of the balance and 2.5M PLEA; at least 1% of the balance, or 2.5M PLEA when
+    /// that is less (so a holder above 250M PLEA can still plead the maximum).
+    function _checkAmount(uint256 amount, uint256 bal) internal pure {
+        if (amount > MAX_SELL || amount > bal * MAX_SHARE_BPS / 10_000) revert AmountTooLarge();
+        uint256 least = bal * MIN_SHARE_BPS / 10_000;
+        if (least > MAX_SELL) least = MAX_SELL;
+        if (amount == 0 || amount < least) revert AmountTooSmall();
     }
 
     // ================================================================ verdict
@@ -447,29 +542,66 @@ contract CabalGate is OracleAttestationConsumer {
     // ================================================================ sell
 
     /// @notice Executes the caller's approved sell within the 7-minute window: the whole amount in
-    /// one swap, for at least `minOut` IMD.
+    /// one swap, for at least `minOut` IMD. Pleas escrowed by the Letterbox sell through it instead.
     function executeSell(uint256 minOut) external returns (uint256 out) {
         uint256 id = pendingOf[msg.sender];
         Plea storage p = pleas[id];
         if (id == 0 || p.status != Status.Approved) revert NotApproved();
-        if (block.timestamp > uint256(p.verdictAt) + EXECUTE_WINDOW) revert WindowLapsed();
-        p.status = Status.Executed;
-        pendingOf[msg.sender] = 0;
-        lastExecutedAt[msg.sender] = block.timestamp;
-        uint256 amount = p.amount;
-        IERC20(address(plea)).safeTransferFrom(msg.sender, address(this), amount);
-        callbackExpected = true;
-        out = abi.decode(IPoolManager(plea.poolManager()).unlock(abi.encode(msg.sender, amount)), (uint256));
-        if (out < minOut) revert SlippageExceeded(out, minOut);
-        emit SellExecuted(id, msg.sender, amount, out);
+        if ((p.flags & FLAG_AUTO_SELL) != 0) revert UseLetterbox();
+        out = _sell(id, p, msg.sender, minOut);
     }
 
+    /// @notice The Letterbox sells an approved plea it escrowed, from its own PLEA, for the seller:
+    /// the IMD goes straight to the seller.
+    function executeSellFor(uint256 id, uint256 minOut) external returns (uint256 out) {
+        address lb = plea.letterbox();
+        if (lb == address(0) || msg.sender != lb) revert NotLetterbox();
+        Plea storage p = pleas[id];
+        if (p.status != Status.Approved || (p.flags & FLAG_AUTO_SELL) == 0) revert NotApproved();
+        out = _sell(id, p, lb, minOut);
+    }
+
+    function _sell(uint256 id, Plea storage p, address from, uint256 minOut) internal returns (uint256 out) {
+        if (block.timestamp > uint256(p.verdictAt) + EXECUTE_WINDOW) revert WindowLapsed();
+        address seller = p.seller;
+        p.status = Status.Executed;
+        pendingOf[seller] = 0;
+        lastExecutedAt[seller] = block.timestamp;
+        uint256 amount = p.amount;
+        IERC20(address(plea)).safeTransferFrom(from, address(this), amount);
+        callbackExpected = true;
+        (, out) = abi.decode(
+            IPoolManager(plea.poolManager()).unlock(abi.encode(false, seller, amount, uint256(0), seller)),
+            (uint256, uint256)
+        );
+        if (out < minOut) revert SlippageExceeded(out, minOut);
+        emit SellExecuted(id, seller, amount, out);
+    }
+
+    /// @dev Sells at most `maxPleaIn` of the caller's (the Letterbox's) PLEA for exactly `imdOut` IMD,
+    /// paid to the caller. The seller is the trader: the hook charges the normal fee, pays the
+    /// seller's cashback and reduces the seller's buy record. Unspent PLEA goes back to the caller.
+    function _swapFee(address seller, uint256 imdOut, uint256 maxPleaIn) internal returns (uint256 pleaIn) {
+        if (imdOut == 0) return 0;
+        IERC20 p = IERC20(address(plea));
+        p.safeTransferFrom(msg.sender, address(this), maxPleaIn);
+        callbackExpected = true;
+        (pleaIn,) = abi.decode(
+            IPoolManager(plea.poolManager()).unlock(abi.encode(true, seller, imdOut, maxPleaIn, msg.sender)),
+            (uint256, uint256)
+        );
+        if (maxPleaIn > pleaIn) p.safeTransfer(msg.sender, maxPleaIn - pleaIn);
+    }
+
+    /// @dev One gate swap: an exact-input sale of a plea (IMD to the seller), or an exact-output fee
+    /// swap (IMD to the Letterbox, PLEA in capped). Either way the gate pays the PLEA it holds.
     function unlockCallback(bytes calldata raw) external returns (bytes memory) {
         IPoolManager pm = IPoolManager(plea.poolManager());
         if (msg.sender != address(pm)) revert NotPoolManager();
         if (!callbackExpected) revert CallbackNotExpected();
         callbackExpected = false;
-        (address seller, uint256 amount) = abi.decode(raw, (address, uint256));
+        (bool exactOut, address seller, uint256 amount, uint256 limit, address to) =
+            abi.decode(raw, (bool, address, uint256, uint256, address));
         IPleaHook h = hook();
         PoolKey memory key = h.poolKey();
         bool pleaIsZero = h.pleaIsZero();
@@ -477,20 +609,25 @@ contract CabalGate is OracleAttestationConsumer {
             key,
             SwapParams({
                 zeroForOne: pleaIsZero,
-                amountSpecified: -int256(amount),
+                amountSpecified: exactOut ? int256(amount) : -int256(amount),
                 sqrtPriceLimitX96: pleaIsZero ? TickMath.MIN_SQRT_PRICE + 1 : TickMath.MAX_SQRT_PRICE - 1
             }),
             abi.encode(seller)
         );
         (int128 pleaDelta, int128 imdDelta) = pleaIsZero ? (d.amount0(), d.amount1()) : (d.amount1(), d.amount0());
         uint256 pleaIn = uint256(uint128(-pleaDelta));
-        if (pleaIn != amount) revert PartialFill(pleaIn, amount);
         uint256 imdOut = uint256(uint128(imdDelta));
+        if (exactOut) {
+            if (imdOut != amount) revert PartialFill(imdOut, amount);
+            if (pleaIn > limit) revert FeeTooHigh(pleaIn, limit);
+        } else if (pleaIn != amount) {
+            revert PartialFill(pleaIn, amount);
+        }
         pm.sync(Currency.wrap(address(plea)));
         IERC20(address(plea)).safeTransfer(address(pm), pleaIn);
         pm.settle();
-        pm.take(Currency.wrap(address(imd)), seller, imdOut);
-        return abi.encode(imdOut);
+        pm.take(Currency.wrap(address(imd)), to, imdOut);
+        return abi.encode(pleaIn, imdOut);
     }
 
     // ================================================================ question

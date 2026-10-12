@@ -48,8 +48,9 @@ contract OracleReplayTest is Fixture {
         uint256 id = plead(alice, plea.balanceOf(alice) / 10);
         OracleAttestation.Attestation memory a = attestation(0, keccak256("denied request"));
         assertTrue(deliver(intakeIdOf(id), a));
+        uint256 amt1 = small(alice);
         vm.prank(alice);
-        uint256 appealId = gate.appeal(id, 1e18, "Please reconsider this smaller sale.");
+        uint256 appealId = gate.appeal(id, amt1, "Please reconsider this smaller sale.");
         a.answer = abi.encode(uint256(45));
         a.figure = 45;
         a.questionHash = keccak256("another question");

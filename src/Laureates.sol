@@ -14,6 +14,7 @@ contract Laureates is ERC721 {
     error NotSeasons();
     error BadName();
     error NameTaken();
+    error NotLetterbox();
 
     event NameSet(address indexed wallet, string name);
 
@@ -46,19 +47,30 @@ contract Laureates is ERC721 {
     /// @notice Sets the caller's display name: 3-20 characters of a-z, 0-9 and _, unique. An empty
     /// string clears it. Reserved: cabal, admin, imd, plea, owner.
     function setName(string calldata name) external {
-        string memory old = _names[msg.sender];
+        _setName(msg.sender, name);
+    }
+
+    /// @notice A `NAME <name>` letter: the Letterbox sets the name of the wallet that sent it.
+    function setNameFor(address wallet, string calldata name) external {
+        address lb = plea.letterbox();
+        if (lb == address(0) || msg.sender != lb) revert NotLetterbox();
+        _setName(wallet, name);
+    }
+
+    function _setName(address wallet, string calldata name) internal {
+        string memory old = _names[wallet];
         if (bytes(old).length != 0) delete nameOwner[keccak256(bytes(old))];
         if (bytes(name).length == 0) {
-            delete _names[msg.sender];
-            emit NameSet(msg.sender, "");
+            delete _names[wallet];
+            emit NameSet(wallet, "");
             return;
         }
         _checkName(bytes(name));
         bytes32 h = keccak256(bytes(name));
         if (nameOwner[h] != address(0)) revert NameTaken();
-        nameOwner[h] = msg.sender;
-        _names[msg.sender] = name;
-        emit NameSet(msg.sender, name);
+        nameOwner[h] = wallet;
+        _names[wallet] = name;
+        emit NameSet(wallet, name);
     }
 
     function nameOf(address wallet) public view returns (string memory) {
@@ -87,10 +99,11 @@ contract Laureates is ERC721 {
         (address seller, uint8 score,,) = g.result(l.pleaId);
         string memory text = g.pleaText(l.pleaId);
         string memory who = bytes(_names[seller]).length != 0 ? _names[seller] : Strings.toHexString(seller);
+        bool byLetter = g.pleaFlags(l.pleaId) & 1 != 0;
         string memory json = string.concat(
             _head(id, l, score, who, text),
-            Base64.encode(bytes(_svg(l, score, who, text, _season(l.seasonKey)))),
-            _attributes(l, score)
+            Base64.encode(bytes(_svg(l, score, who, text, _season(l.seasonKey), byLetter))),
+            _attributes(l, score, byLetter)
         );
         return string.concat("data:application/json;base64,", Base64.encode(bytes(json)));
     }
@@ -126,7 +139,7 @@ contract Laureates is ERC721 {
         );
     }
 
-    function _attributes(Laureate memory l, uint8 score) internal pure returns (string memory) {
+    function _attributes(Laureate memory l, uint8 score, bool byLetter) internal pure returns (string memory) {
         return string.concat(
             '","attributes":[{"trait_type":"Season","value":',
             Strings.toString(uint256(l.seasonKey) + 1),
@@ -134,15 +147,18 @@ contract Laureates is ERC721 {
             Strings.toString(l.rank),
             '},{"trait_type":"Score","value":',
             Strings.toString(score),
-            "}]}"
+            byLetter ? '},{"trait_type":"Seal","value":"By letter"}]}' : "}]}"
         );
     }
 
-    function _svg(Laureate memory l, uint8 score, string memory who, string memory text, string memory season)
-        internal
-        pure
-        returns (string memory s)
-    {
+    function _svg(
+        Laureate memory l,
+        uint8 score,
+        string memory who,
+        string memory text,
+        string memory season,
+        bool byLetter
+    ) internal pure returns (string memory s) {
         s = string.concat(
             '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 600"><rect width="600" height="600" fill="#14110f"/>',
             '<rect x="20" y="20" width="560" height="560" fill="none" stroke="#c9a227" stroke-width="2"/>',
@@ -178,7 +194,19 @@ contract Laureates is ERC721 {
             Strings.toString(l.pleaId),
             " by ",
             _escapeXml(bytes(who)),
-            "</text></svg>"
+            "</text>",
+            byLetter ? _seal() : "",
+            "</svg>"
+        );
+    }
+
+    /// @dev A red wax seal in the bottom-right corner for a plea sent by letter.
+    function _seal() internal pure returns (string memory) {
+        return string.concat(
+            '<circle cx="520" cy="500" r="40" fill="#8e1b1b" stroke="#5c0f0f" stroke-width="4"/>',
+            '<circle cx="520" cy="500" r="30" fill="none" stroke="#c94a3a" stroke-width="1.5"/>',
+            '<text x="520" y="497" fill="#f2d7c9" font-family="Georgia,serif" font-size="11" text-anchor="middle">BY</text>',
+            '<text x="520" y="511" fill="#f2d7c9" font-family="Georgia,serif" font-size="11" text-anchor="middle">LETTER</text>'
         );
     }
 

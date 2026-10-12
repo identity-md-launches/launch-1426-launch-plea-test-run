@@ -41,6 +41,18 @@
       ]
     },
     {
+      "contract": "Letterbox",
+      "constructorArgs": [
+        "$contract:PLEA",
+        "$contract:CabalGate",
+        "$contract:Seasons",
+        "$contract:Laureates",
+        "0x2B69099E59b05901faA1DD164fabf098bf831E82",
+        "0x44a1Cd38474FB1748400E7DEb5F8D786ccE3F89A",
+        "true"
+      ]
+    },
+    {
       "contract": "PleaLaunch",
       "constructorArgs": [
         "$contract:PLEA",
@@ -48,6 +60,7 @@
         "$contract:Seasons",
         "$contract:Laureates",
         "$contract:PleaDistributor",
+        "$contract:Letterbox",
         "0xE03A1074c86CFeDd5C142C4F04F1a1536e203543",
         "0x2B69099E59b05901faA1DD164fabf098bf831E82",
         "0x0457276D7b036818B3EddC1A4A3FCeda61e9314d",

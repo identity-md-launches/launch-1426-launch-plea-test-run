@@ -50,13 +50,15 @@ contract AuditRevisionTest is Fixture {
         uint256 id = approvedPlea(alice, 45);
         uint256 verdictAt = gate.getPlea(id).verdictAt;
         skip(7 minutes + 1);
+        uint256 amt101 = small(alice);
         vm.expectRevert(abi.encodeWithSelector(CabalGate.Cooldown.selector, verdictAt + 4 hours));
-        plead(alice, 1e18);
+        plead(alice, amt101);
         vm.warp(verdictAt + 4 hours - 1);
+        uint256 amt102 = small(alice);
         vm.expectRevert(abi.encodeWithSelector(CabalGate.Cooldown.selector, verdictAt + 4 hours));
-        plead(alice, 1e18);
+        plead(alice, amt102);
         vm.warp(verdictAt + 4 hours);
-        plead(alice, 1e18);
+        plead(alice, small(alice));
         assertEq(uint8(gate.getPlea(id).status), uint8(CabalGate.Status.Lapsed));
         seasons.record(id); // lapse remains an approval; it just cannot accelerate scoring
         assertEq(seasons.bestOf(0, alice)[0], 45);
@@ -145,31 +147,37 @@ contract AuditRevisionTest is Fixture {
         buy(alice, 50e18);
         uint256 id = plead(alice, plea.balanceOf(alice) / 10);
         assertTrue(answer(id, 0));
+        uint256 amt1 = small(alice);
         vm.prank(alice);
-        uint256 a = gate.appeal(id, 1e18, "Please reconsider.");
+        uint256 a = gate.appeal(id, amt1, "Please reconsider.");
         intake.complete(intakeIdOf(a), 1, ""); // the failure function clears it
         assertEq(uint8(gate.getPlea(a).status), uint8(CabalGate.Status.Expired));
         assertFalse(gate.getPlea(id).appealed, "unjudged appeal consumed the only appeal");
         uint256 until = gate.getPlea(id).verdictAt + 4 hours;
+        uint256 amt103 = small(alice);
         vm.expectRevert(abi.encodeWithSelector(CabalGate.Cooldown.selector, until));
-        plead(alice, 1e18);
+        plead(alice, amt103);
+        uint256 amt2 = small(alice);
         vm.prank(alice);
-        uint256 retry = gate.appeal(id, 1e18, "Retry the unanswered appeal.");
+        uint256 retry = gate.appeal(id, amt2, "Retry the unanswered appeal.");
         assertTrue(answer(retry, 0));
+        uint256 amt3 = small(alice);
         vm.prank(alice);
         vm.expectRevert(CabalGate.AlreadyAppealed.selector);
-        gate.appeal(id, 1e18, "No third judgment.");
+        gate.appeal(id, amt3, "No third judgment.");
     }
 
     function test_appealRetryClearsTimedOutPendingAppeal() public {
         buy(alice, 50e18);
         uint256 id = plead(alice, plea.balanceOf(alice) / 10);
         assertTrue(answer(id, 0));
+        uint256 amt4 = small(alice);
         vm.prank(alice);
-        uint256 a = gate.appeal(id, 1e18, "Please reconsider.");
+        uint256 a = gate.appeal(id, amt4, "Please reconsider.");
         skip(20 minutes + 1);
+        uint256 amt5 = small(alice);
         vm.prank(alice);
-        uint256 retry = gate.appeal(id, 1e18, "Retry after timeout.");
+        uint256 retry = gate.appeal(id, amt5, "Retry after timeout.");
         assertEq(uint8(gate.getPlea(a).status), uint8(CabalGate.Status.Expired));
         assertEq(gate.pendingOf(alice), retry);
         assertFalse(answer(a, 45));
@@ -181,14 +189,16 @@ contract AuditRevisionTest is Fixture {
         uint256 id = plead(alice, plea.balanceOf(alice) / 10);
         assertTrue(answer(id, 0));
         uint256 deadline = gate.getPlea(id).verdictAt + 4 hours;
+        uint256 amt6 = small(alice);
         vm.prank(alice);
-        uint256 a = gate.appeal(id, 1e18, "Please reconsider.");
+        uint256 a = gate.appeal(id, amt6, "Please reconsider.");
         intake.complete(intakeIdOf(a), 1, ""); // the failure function clears it
         assertEq(uint8(gate.getPlea(a).status), uint8(CabalGate.Status.Expired));
         vm.warp(deadline + 1);
+        uint256 amt7 = small(alice);
         vm.prank(alice);
         vm.expectRevert(CabalGate.AppealClosed.selector);
-        gate.appeal(id, 1e18, "Too late to retry.");
+        gate.appeal(id, amt7, "Too late to retry.");
     }
 
     function test_deadCabalBuyStillRequiresARecipient() public {

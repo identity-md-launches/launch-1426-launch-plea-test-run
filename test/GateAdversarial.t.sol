@@ -29,7 +29,7 @@ contract GateAdversarialTest is SepoliaFixture {
     }
 
     function test_latePendingCannotConsumeSignatureOrExtendHeartbeat() public {
-        uint256 id = plead(alice, 1e18);
+        uint256 id = plead(alice, small(alice));
         bytes32 request = intakeIdOf(id);
         uint64 heartbeat = gate.lastVerdictAt();
         vm.warp(uint256(gate.getPlea(id).submittedAt) + 20 minutes + 1);
@@ -48,17 +48,19 @@ contract GateAdversarialTest is SepoliaFixture {
     }
 
     function test_approvedWindowOnlyClearsAfterTheLastSecond() public {
-        uint256 id = plead(alice, 1e18);
+        uint256 id = plead(alice, small(alice));
         assertTrue(answer(id, 45));
         uint256 verdictAt = gate.getPlea(id).verdictAt;
         vm.warp(verdictAt + 7 minutes);
+        uint256 amt1 = small(alice);
         vm.prank(alice);
         vm.expectRevert(CabalGate.PendingExists.selector);
-        gate.submitSell(1e18, "another plea");
+        gate.submitSell(amt1, "another plea");
         vm.warp(vm.getBlockTimestamp() + 1);
         uint256 feeBalance = oimd.balanceOf(alice);
+        uint256 amt101 = small(alice);
         vm.expectRevert(abi.encodeWithSelector(CabalGate.Cooldown.selector, verdictAt + 4 hours));
-        plead(alice, 1e18);
+        plead(alice, amt101);
         assertEq(gate.pendingOf(alice), id, "failed submission must roll back stale clearing");
         assertEq(uint8(gate.getPlea(id).status), uint8(CabalGate.Status.Approved));
         assertEq(oimd.balanceOf(alice), feeBalance);
@@ -66,7 +68,7 @@ contract GateAdversarialTest is SepoliaFixture {
         vm.expectRevert(CabalGate.WindowLapsed.selector);
         gate.executeSell(0);
         vm.warp(verdictAt + 4 hours);
-        uint256 next = plead(alice, 1e18);
+        uint256 next = plead(alice, small(alice));
         assertEq(gate.pendingOf(alice), next);
         assertEq(gate.lastLapsedAt(alice), verdictAt);
         assertEq(uint8(gate.getPlea(id).status), uint8(CabalGate.Status.Lapsed));
@@ -75,35 +77,38 @@ contract GateAdversarialTest is SepoliaFixture {
     }
 
     function test_denialCooldownEndsExactlyAtFourHours() public {
-        uint256 id = plead(alice, 1e18);
+        uint256 id = plead(alice, small(alice));
         assertTrue(answer(id, 0));
         uint256 until = gate.lastDeniedAt(alice) + 4 hours;
         vm.warp(until - 1);
+        uint256 amt2 = small(alice);
         vm.prank(alice);
         vm.expectRevert(abi.encodeWithSelector(CabalGate.Cooldown.selector, until));
-        gate.submitSell(1e18, "too soon");
+        gate.submitSell(amt2, "too soon");
         vm.warp(until);
-        uint256 next = plead(alice, 1e18);
+        uint256 next = plead(alice, small(alice));
         assertGt(next, id);
     }
 
     function test_appealIsAcceptedAtItsLastSecondAndCannotBeStolen() public {
-        uint256 id = plead(alice, 1e18);
+        uint256 id = plead(alice, small(alice));
         assertTrue(answer(id, 0));
+        uint256 amt3 = small(bob);
         vm.prank(bob);
         vm.expectRevert(CabalGate.NotSeller.selector);
-        gate.appeal(id, 1e18, "not my plea");
+        gate.appeal(id, amt3, "not my plea");
         vm.warp(uint256(gate.getPlea(id).verdictAt) + 4 hours);
         uint256 before = hook.retainedImd();
+        uint256 amt4 = small(alice);
         vm.prank(alice);
-        uint256 appealId = gate.appeal(id, 1e18, "my final second");
+        uint256 appealId = gate.appeal(id, amt4, "my final second");
         assertTrue(gate.getPlea(id).appealed);
         assertTrue(gate.getPlea(appealId).isAppeal);
         assertEq(hook.retainedImd(), before + 0.35e18);
     }
 
     function test_appealOracleFeeFailureRollsBackWallFundingAndOriginalFlag() public {
-        uint256 id = plead(alice, 1e18);
+        uint256 id = plead(alice, small(alice));
         assertTrue(answer(id, 0));
         uint256 next = gate.nextId();
         uint256 reserve = hook.retainedImd();
@@ -111,11 +116,12 @@ contract GateAdversarialTest is SepoliaFixture {
         uint256 balance = imd.balanceOf(alice);
         vm.prank(alice);
         oimd.approve(address(gate), 0);
+        uint256 amt5 = small(alice);
         vm.prank(alice);
         vm.expectRevert(
             abi.encodeWithSelector(IERC20Errors.ERC20InsufficientAllowance.selector, address(gate), uint256(0), 0.5e18)
         );
-        gate.appeal(id, 1e18, "retryable appeal");
+        gate.appeal(id, amt5, "retryable appeal");
         assertFalse(gate.getPlea(id).appealed);
         assertEq(gate.nextId(), next);
         assertEq(gate.pendingOf(alice), 0);
@@ -124,7 +130,8 @@ contract GateAdversarialTest is SepoliaFixture {
         assertEq(imd.balanceOf(alice), balance);
         vm.startPrank(alice);
         oimd.approve(address(gate), 0.5e18);
-        assertEq(gate.appeal(id, 1e18, "retryable appeal"), next);
+        uint256 amt6 = small(alice);
+        assertEq(gate.appeal(id, amt6, "retryable appeal"), next);
         vm.stopPrank();
     }
 
@@ -147,13 +154,14 @@ contract GateAdversarialTest is SepoliaFixture {
     }
 
     function test_missingSellAllowanceDoesNotConsumeTheApprovedPlea() public {
-        uint256 id = plead(alice, 1e18);
+        uint256 id = plead(alice, small(alice));
+        uint256 amount = gate.getPlea(id).amount;
         assertTrue(answer(id, 45));
         vm.prank(alice);
         plea.approve(address(gate), 0);
         vm.prank(alice);
         vm.expectRevert(
-            abi.encodeWithSelector(IERC20Errors.ERC20InsufficientAllowance.selector, address(gate), uint256(0), 1e18)
+            abi.encodeWithSelector(IERC20Errors.ERC20InsufficientAllowance.selector, address(gate), uint256(0), amount)
         );
         gate.executeSell(0);
         assertEq(gate.pendingOf(alice), id);
@@ -161,24 +169,45 @@ contract GateAdversarialTest is SepoliaFixture {
         assertEq(plea.balanceOf(address(gate)), 0);
     }
 
-    function test_amountLimitsFailBeforeChargingAndOneWeiCanBeSubmitted() public {
+    function test_amountLimitsFailBeforeChargingAndOnePercentIsTheMinimum() public {
         uint256 before = oimd.balanceOf(alice);
-        uint256[4] memory amounts =
-            [uint256(0), 2_500_000e18 + 1, plea.balanceOf(alice) * 35 / 100 + 1, type(uint256).max];
-        for (uint256 i; i < amounts.length; ++i) {
+        uint256 bal = plea.balanceOf(alice);
+        uint256[3] memory tooLarge = [2_500_000e18 + 1, bal * 35 / 100 + 1, type(uint256).max];
+        for (uint256 i; i < tooLarge.length; ++i) {
             vm.prank(alice);
             vm.expectRevert(CabalGate.AmountTooLarge.selector);
-            gate.submitSell(amounts[i], "invalid size");
-            assertEq(oimd.balanceOf(alice), before);
-            assertEq(gate.pendingOf(alice), 0);
+            gate.submitSell(tooLarge[i], "invalid size");
         }
-        uint256 id = plead(alice, 1);
-        assertEq(gate.getPlea(id).amount, 1);
+        uint256[3] memory tooSmall = [uint256(0), 1, bal / 100 - 1];
+        for (uint256 i; i < tooSmall.length; ++i) {
+            vm.prank(alice);
+            vm.expectRevert(CabalGate.AmountTooSmall.selector);
+            gate.submitSell(tooSmall[i], "invalid size");
+        }
+        assertEq(oimd.balanceOf(alice), before);
+        assertEq(gate.pendingOf(alice), 0);
+        uint256 id = plead(alice, bal / 100);
+        assertEq(gate.getPlea(id).amount, bal / 100);
         assertEq(oimd.balanceOf(alice), before - 0.5e18);
     }
 
+    /// Above 250M PLEA, 1% of the balance is more than the 2.5M cap: the cap is then the minimum.
+    function test_aWhaleCanStillPleadTheMaximum() public {
+        imd.mint(alice, 10_000_000e18);
+        vm.prank(alice);
+        imd.approve(address(router), type(uint256).max);
+        while (plea.balanceOf(alice) <= 260_000_000e18) {
+            buy(alice, 500_000e18);
+        }
+        vm.prank(alice);
+        vm.expectRevert(CabalGate.AmountTooSmall.selector);
+        gate.submitSell(2_500_000e18 - 1, "just under the cap");
+        uint256 id = plead(alice, 2_500_000e18);
+        assertEq(gate.getPlea(id).amount, 2_500_000e18);
+    }
+
     function test_gateUnlockCallbackCannotBeInvokedOutsideItsOwnSale() public {
-        bytes memory raw = abi.encode(alice, 1e18);
+        bytes memory raw = abi.encode(false, alice, 1e18, uint256(0), alice);
         vm.expectRevert(CabalGate.NotPoolManager.selector);
         gate.unlockCallback(raw);
         vm.prank(address(pm));
@@ -188,7 +217,7 @@ contract GateAdversarialTest is SepoliaFixture {
     }
 
     function testFuzz_panelAndAnswerValidationCannotConsumeRequests(uint8 seed) public {
-        uint256 id = plead(alice, 1e18);
+        uint256 id = plead(alice, small(alice));
         bytes32 rid = intakeIdOf(id);
         OracleAttestation.Attestation memory a = attestation(45, keccak256("invalid then valid"));
         uint256 field = bound(seed, 0, 6);
@@ -224,7 +253,7 @@ contract GateAdversarialTest is SepoliaFixture {
 
     /// @dev Meeting our minimum 17 votes does not meet a larger quorum declared by the signed panel.
     function testFuzz_signedQuorumMustBeReached(uint16 rawQuorum, bool approved) public {
-        uint256 id = plead(alice, 1e18);
+        uint256 id = plead(alice, small(alice));
         bytes32 rid = intakeIdOf(id);
         uint64 heartbeat = gate.lastVerdictAt();
         skip(1);
@@ -252,7 +281,7 @@ contract GateAdversarialTest is SepoliaFixture {
     }
 
     function test_futureIssuanceAndExpiredAttestationsRejectAtExactBoundaries() public {
-        uint256 id = plead(alice, 1e18);
+        uint256 id = plead(alice, small(alice));
         bytes32 rid = intakeIdOf(id);
         OracleAttestation.Attestation memory a = attestation(45, keccak256("time bounds"));
         a.issuedAt = uint64(vm.getBlockTimestamp() + 5 minutes + 1);
@@ -265,7 +294,7 @@ contract GateAdversarialTest is SepoliaFixture {
         assertTrue(deliver(rid, a));
         assertEq(uint8(gate.getPlea(id).status), uint8(CabalGate.Status.Approved));
 
-        uint256 second = plead(bob, 1e18);
+        uint256 second = plead(bob, small(bob));
         a = attestation(45, keccak256("inclusive expiration"));
         a.expiresAt = uint64(vm.getBlockTimestamp());
         assertTrue(deliver(intakeIdOf(second), a));
@@ -273,7 +302,7 @@ contract GateAdversarialTest is SepoliaFixture {
     }
 
     function test_changingSignedAnswerOrConsumerChainInvalidatesSignature() public {
-        uint256 id = plead(alice, 1e18);
+        uint256 id = plead(alice, small(alice));
         bytes32 rid = intakeIdOf(id);
         OracleAttestation.Attestation memory a = attestation(0, keccak256("tamper"));
         bytes memory signature = sign(a);
@@ -295,7 +324,7 @@ contract GateAdversarialTest is SepoliaFixture {
     function test_deadManExpiresAtTheExactSecondAndNeverAcceptsANewVerdict() public {
         vm.warp(uint256(gate.lastVerdictAt()) + 118800 - 1);
         assertTrue(gate.cabalAlive());
-        uint256 id = plead(alice, 1e18);
+        uint256 id = plead(alice, small(alice));
         uint64 expectedDeath = gate.lastVerdictAt() + 118800;
         vm.warp(expectedDeath);
         assertFalse(gate.cabalAlive());
@@ -315,7 +344,7 @@ contract GateAdversarialTest is SepoliaFixture {
             uint8 c = uint8(32 + uint256(keccak256(abi.encode(seed, i))) % 95);
             text[i] = c == uint8(bytes1("[")) ? bytes1("(") : bytes1(c);
         }
-        uint256 id = plead(alice, 1e18, string(text));
+        uint256 id = plead(alice, small(alice), string(text));
         assertEq(gate.pleaText(id), string(text));
         assertEq(vm.parseJsonString(gate.body(id), ".question"), gate.question(id));
         assertEq(vm.parseJsonUint(gate.body(id), ".panelSize"), 30);
@@ -339,9 +368,10 @@ contract GateAdversarialTest is SepoliaFixture {
         ];
         uint256 balance = oimd.balanceOf(alice);
         for (uint256 i; i < bad.length; ++i) {
+            uint256 amt7 = small(alice);
             vm.prank(alice);
             vm.expectRevert(CabalGate.BadPleaText.selector);
-            gate.submitSell(1e18, string(bad[i]));
+            gate.submitSell(amt7, string(bad[i]));
             assertEq(oimd.balanceOf(alice), balance);
             assertEq(gate.pendingOf(alice), 0);
         }

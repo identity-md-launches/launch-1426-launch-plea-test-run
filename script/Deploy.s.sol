@@ -7,6 +7,7 @@ import {CabalGate} from "../src/CabalGate.sol";
 import {Seasons} from "../src/Seasons.sol";
 import {Laureates} from "../src/Laureates.sol";
 import {PleaDistributor} from "../src/PleaDistributor.sol";
+import {Letterbox} from "../src/Letterbox.sol";
 import {PleaLaunch} from "../src/PleaLaunch.sol";
 
 /// @notice What the IMD launch does, as one script, for local runs and gas checks (a fork or anvil).
@@ -29,12 +30,22 @@ contract Deploy is Script {
         Seasons seasons = new Seasons(address(plea), address(gate), vm.envAddress("IMD"));
         Laureates laureates = new Laureates(address(plea));
         PleaDistributor distributor = new PleaDistributor(address(plea), vm.envAddress("OWNER"));
+        Letterbox letterbox = new Letterbox(
+            address(plea),
+            address(gate),
+            address(seasons),
+            address(laureates),
+            vm.envAddress("IMD"),
+            vm.envAddress("ORACLE_ASSET"),
+            vm.envBool("MINT_ORACLE_FEE")
+        );
         PleaLaunch launch = new PleaLaunch(
             address(plea),
             address(gate),
             address(seasons),
             address(laureates),
             address(distributor),
+            address(letterbox),
             vm.envAddress("POOL_MANAGER"),
             vm.envAddress("IMD"),
             vm.envAddress("STACKER"),
@@ -47,6 +58,7 @@ contract Deploy is Script {
         console2.log("Seasons", address(seasons));
         console2.log("Laureates", address(laureates));
         console2.log("PleaDistributor", address(distributor));
+        console2.log("Letterbox", address(letterbox));
         console2.log("PleaLaunch", address(launch));
     }
 }
